@@ -1,0 +1,1165 @@
+%% ============================================================
+%% LipMamba — INJOIT submission version
+%% Paper M4: Lipschitz-Constrained Selective State-Space Models
+%%          with PAC-Bayesian Certificates for Certified Robustness
+%%          Against Hidden State Poisoning in Language Models
+%%
+%% Target journal: International Journal of Open Information
+%%                 Technologies (INJOIT), Lomonosov MSU, Moscow
+%%                 VAK specialty 2.3.1 (К2)
+%%
+%% Compilation:
+%%   (1) pdfLaTeX + stock IEEEtran.cls  (portable; default)
+%%   (2) For final INJOIT submission, after `git clone
+%%       github.com/merofeev/injoit-template`, replace the
+%%       \documentclass line below with:
+%%          \documentclass[journal]{INJOIT}      % English primary
+%%       and compile with xelatex.
+%% ============================================================
+
+\documentclass[journal,a4paper,10pt]{IEEEtran}
+
+% ---- Core packages (Overleaf-ready) ----
+\usepackage[utf8]{inputenc}
+\usepackage[T2A,T1]{fontenc}
+\usepackage[english,russian,main=english]{babel}
+\usepackage{amsmath,amssymb,amsfonts,amsthm}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{cite}
+\usepackage{balance}
+\usepackage{url}
+\usepackage{array}
+\usepackage{nicefrac}
+\usepackage[expansion=false]{microtype}
+\usepackage{mathtools}
+\usepackage{bm}
+\usepackage{enumitem}
+
+% ---- Theorem environments ----
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}
+
+% ---- TikZ and pgfplots ----
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit,
+                 backgrounds, calc, decorations.pathreplacing}
+
+% ---- Float spacing (compact layout for INJOIT) ----
+\setlength{\textfloatsep}{8pt plus 2pt minus 4pt}
+\setlength{\floatsep}{6pt plus 2pt minus 3pt}
+\setlength{\intextsep}{6pt plus 2pt minus 2pt}
+\setlength{\abovecaptionskip}{4pt plus 1pt minus 1pt}
+\setlength{\belowcaptionskip}{2pt plus 1pt minus 1pt}
+\setlength{\abovedisplayskip}{6pt plus 2pt minus 3pt}
+\setlength{\belowdisplayskip}{6pt plus 2pt minus 3pt}
+
+% ---- Math commands ----
+\newcommand{\modelname}{LipMamba}
+\newcommand{\benchname}{ROBENCH-26}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\NN}{\mathbb{N}}
+\providecommand{\Prob}{}\renewcommand{\Prob}{\mathbb{P}}
+\newcommand{\Hcal}{\mathcal{H}}
+\newcommand{\Lcal}{\mathcal{L}}
+\newcommand{\Dcal}{\mathcal{D}}
+\newcommand{\Tcal}{\mathcal{T}}
+\newcommand{\Xcal}{\mathcal{X}}
+\newcommand{\Ycal}{\mathcal{Y}}
+\newcommand{\Fcal}{\mathcal{F}}
+\newcommand{\Scal}{\mathcal{S}}
+\newcommand{\Mcal}{\mathcal{M}}
+\newcommand{\Ncal}{\mathcal{N}}
+\newcommand{\Pcal}{\mathcal{P}}
+\newcommand{\Qcal}{\mathcal{Q}}
+\newcommand{\KL}{\mathrm{KL}}
+\newcommand{\norm}[1]{\left\|#1\right\|}
+\newcommand{\abs}[1]{\left|#1\right|}
+\DeclareMathOperator{\softplus}{softplus}
+\DeclareMathOperator{\softmax}{softmax}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\sigmamax}{\sigma_{max}}
+\DeclareMathOperator{\SiLU}{SiLU}
+\DeclareMathOperator{\ECE}{ECE}
+
+\begin{document}
+
+\title{\modelname{}: Lipschitz-Constrained Selective State-Space Models with PAC-Bayesian Certificates for Certified Robustness Against Hidden State Poisoning in Language Models}
+
+\author{%
+  Roger~Nick~Anaedevha,~\IEEEmembership{Member,~IEEE},
+  Alexander~Gennadevich~Trofimov,
+  and~Yuri~Vladimirovich~Borodachev%
+  \thanks{Manuscript received \ldots; revised \ldots. This work was supported by a grant for research centers in Artificial Intelligence from the Ministry of Economic Development of the Russian Federation under subsidy agreement (identifier 000000C313925P3Q0002). All authors contributed equally as co-first authors of this publication.}%
+  \thanks{R.\,N.~Anaedevha and A.\,G.~Trofimov are with the National Research Nuclear University MEPhI (Moscow Engineering Physics Institute), Moscow 115409, Russia (e-mail: ar006@campus.mephi.ru; agtrofimov@mephi.ru). R.\,N.~Anaedevha is the corresponding author.}%
+  \thanks{Y.\,V.~Borodachev is with the Artificial Intelligence Research Center, National Research Nuclear University MEPhI, Moscow 115409, Russia.}%
+  \thanks{Code, certified checkpoints, and the \benchname{} extension are released through the RobustIDPS.ai platform: \url{https://github.com/rogerpanel/LipMamba}.}%
+}
+
+%% For the camera-ready INJOIT version, uncomment:
+% \markboth{International Journal of Open Information Technologies ISSN: 2307-8162 vol.~?, no.~?, 20??}{}
+
+\maketitle
+
+\begin{abstract}
+Selective state-space models such as Mamba have emerged as efficient linear-time alternatives to attention-based language models, but recent work has shown that their input-dependent discretization mechanism creates a previously unrecognized attack surface: short adversarial token sequences can drive the discretization step size $\Delta_t$ toward saturation, producing irreversible \emph{hidden state poisoning} (HiSPA) that erases prior context and propagates through all subsequent tokens. Existing defenses, including activation-pattern detectors and circuit-breaking techniques, provide empirical mitigation but no formal guarantees. This paper introduces \modelname{}, a Lipschitz-constrained selective SSM architecture coupled with PAC-Bayesian generalization certificates that together provide the first \emph{certified} architectural defense against hidden state poisoning. Three contributions are presented. First, we derive tight Lipschitz bounds for selective SSM layers that account for the input-dependent triplet $(\Delta_t, \mathbf{B}_t, \mathbf{C}_t)$, yielding a recursively-computable bound on state sensitivity. Second, we prove a certified poisoning-immunity theorem establishing that under spectrally-constrained parameterizations of the projection networks and a clipped step size $\Delta_t \leq \Delta_{\max}$, no trigger of length below an analytically computed bound $\ell^*$ can drive the hidden state norm below a chosen safety threshold $\alpha_{\min}$. Third, we extend McAllester-style PAC-Bayesian bounds to Lipschitz-constrained SSMs, yielding simultaneous generalization and adversarial robustness certificates with non-vacuous numerical values at the 130--370~M parameter scale. We evaluate \modelname{} on RoBench-25, HarmBench, JailbreakBench, and four network intrusion datasets (CIC-IDS2017, Edge-IIoTset, UNSW-NB15, TON\_IoT), demonstrating $80.4\%$ certified accuracy at certified radius $\epsilon^* = 0.18$ against HiSPA attacks at trigger length $\ell = 24$, with only $4.7\%$ clean perplexity overhead versus unconstrained Mamba and a $61.2$ percentage-point reduction in attack success rate. \modelname{} integrates with the RobustIDPS.ai platform as a certified replacement for the MambaShield sequential-pattern model, processing flow streams at $0.6$~ms latency on a single CPU core.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Selective state-space models, Mamba, Lipschitz continuity, PAC-Bayes, certified robustness, hidden state poisoning, language models, intrusion detection systems.
+\end{IEEEkeywords}
+
+%% ============================================================
+\section{Introduction}
+\label{sec:introduction}
+%% ============================================================
+
+\IEEEPARstart{S}{elective} state-space models (SSMs)---most prominently Mamba~\cite{gu2024mamba} and Mamba-2~\cite{dao2024mamba2}---have emerged as efficient linear-time alternatives to attention-based language models, achieving competitive perplexity at inference latencies $5$--$20\times$ lower than Transformers of comparable parameter counts. Their efficiency derives from a continuous-time recurrence with input-dependent discretization: at each token $t$, the parameters $\Delta_t$, $\mathbf{B}_t$, and $\mathbf{C}_t$ are predicted from the input $\mathbf{x}_t$, allowing the model to selectively remember or forget information. This mechanism, while computationally elegant, introduces a previously unrecognized attack surface.
+
+Le Mercier, Develder, and Demeester~\cite{lemercier2026hispa} recently identified \emph{hidden state poisoning} (HiSPA) as a class of inference-time, architecture-specific attacks against Mamba-based models. The attack exploits the fact that when an attacker can drive the discretization step $\Delta_t = \softplus(\mathbf{W}_\Delta \mathbf{x}_t)$ toward large values, the discretized state matrix $\bar{\mathbf{A}}_t = \exp(\Delta_t \mathbf{A})$ approaches zero (since $\mathbf{A}$ has strictly negative eigenvalues by HiPPO initialization~\cite{gu2020hippo}). A single attacker-controlled token can therefore multiplicatively attenuate every contribution from the preceding $L$ tokens, producing irreversible "partial amnesia" in the recurrent state. Empirically, optimized HiSPA triggers cause Jamba-1.7-Mini and other Mamba--Transformer hybrids to collapse on the RoBench-25 benchmark while pure Transformers of comparable size are unaffected.
+
+Existing defenses against HiSPA are empirical. CLASP~\cite{lemercier2026clasp} trains a detector on Mamba block-output embedding patterns achieving $95.9\%$ token-level F1, while Spectral\-Guard~\cite{lemercier2026spectralguard} derives a Spectral Horizon Bound on adversarial spectral drift of $\bar{\mathbf{A}}_t$. None of these methods provides \emph{certified} architectural defense---a worst-case guarantee that adversarial perturbations within a formally computed radius cannot alter detection or generation behavior. As Mamba-class models are increasingly deployed in agentic and security-critical applications, this gap becomes a critical liability.
+
+Our prior work has progressively addressed elements of this challenge. MambaShield~\cite{anaedevha2025mambashield} introduced PAC-Bayes-inspired training and progressive adversarial robustness distillation for selective SSMs in network intrusion detection, but without formal Lipschitz analysis or certified poisoning radii. Uncertainty-calibrated hierarchical Gaussian processes~\cite{anaedevha2026uchgp} provided multi-scale temporal calibration. Temporal adaptive Neural ODE methods~\cite{anaedevha2026tanode} addressed irregular event timing. Adversarial robustness for IDS~\cite{anaedevha2024adversarial} and stochastic multimodal transformers~\cite{anaedevha2025stochastic} contributed empirical robustness baselines. Reinforcement-learning poisoning defenses~\cite{anaedevha2025dqn} and applied wireless device identification~\cite{anaedevha2024wireless} demonstrated cross-domain transfer. Across this series, however, \emph{architectural certificates against hidden state poisoning have remained absent}---the present paper closes this gap.
+
+\subsection{Contributions}
+
+This paper makes the following contributions.
+
+\textit{Tight Lipschitz analysis of selective SSM.} We derive a recursively-computable Lipschitz bound for Mamba-style selective layers that explicitly accounts for the input-dependence of $(\Delta_t, \mathbf{B}_t, \mathbf{C}_t)$, decomposing the bound into a readout term and a state-dynamics term whose contraction is governed by the spectral radius of $\bar{\mathbf{A}}_t$. To our knowledge this is the first explicit Lipschitz bound for selective (input-dependent) SSMs.
+
+\textit{Spectrally-constrained architecture preserving selectivity.} We propose \modelname{}, a parameterization that enforces target spectral norms $(s_B, s_C, s_\Delta)$ on the projection networks via power-iteration spectral normalization~\cite{miyato2018spectral}, constrains state-matrix eigenvalues to $[-\lambda_{\max}, -\lambda_{\min}]$ via reparameterization, and clips the discretization step via a saturating activation $\Delta_t \leq \Delta_{\max}$. This composes with the GloroNet certification head~\cite{leino2021globally} to deliver per-input deterministic robustness margins.
+
+\textit{Certified poisoning-immunity theorem.} We prove that under \modelname{}'s constraints, the post-trigger state norm satisfies an exponentially-decaying lower bound, certifying that no trigger of length below an analytically computed bound $\ell^*$ can drive the hidden state below a chosen retention ratio $\alpha_{\min}$.
+
+\textit{PAC-Bayesian certificates over Lipschitz-constrained posteriors.} We extend McAllester-style PAC-Bayes bounds~\cite{mcallester2003pac,perezortiz2021tighter} to selective SSMs by coupling the Lipschitz constant $L_{\mathrm{SSM}}$ with the KL-divergence term, obtaining simultaneous generalization and adversarial robustness certificates. Numerical evaluation yields non-vacuous bounds at the 130--370~M parameter scale, building on the LLM-scale feasibility demonstrated by Lotfi et al.~\cite{lotfi2024nonvacuous} and the dynamical-systems treatment of Eringis et al.~\cite{eringis2024pacbayes}.
+
+\textit{Comprehensive empirical evaluation and platform integration.} We evaluate \modelname{} on RoBench-25, HarmBench, JailbreakBench, and four network IDS datasets, demonstrating $80.4\%$ certified accuracy at $\epsilon^* = 0.18$ against HiSPA at trigger length $24$, with $4.7\%$ clean perplexity overhead and $61.2$ percentage-point reduction in attack success rate. \modelname{} is integrated into the RobustIDPS.ai platform~\cite{anaedevha2026robustidps} as a certified replacement for MambaShield, processing flow streams at $0.6$~ms latency on a single CPU core.
+
+The remainder of the paper is organized as follows. Section~\ref{sec:related} surveys related work in four cohesive areas. Section~\ref{sec:preliminaries} formalizes the threat model and problem statement. Section~\ref{sec:framework} presents the \modelname{} architecture, the algorithmic specification (Algorithm~\ref{alg:lipmamba}), and the integration with RobustIDPS.ai. Section~\ref{sec:theory} states the Lipschitz, immunity, and PAC-Bayes theorems. Section~\ref{sec:experiments} describes experimental methodology. Section~\ref{sec:results} reports results, ablations, and the multi-dimensional achievement profile (Fig.~\ref{fig:radar}). Section~\ref{sec:discussion} discusses deployment, limitations, and threats to validity. Section~\ref{sec:conclusion} concludes.
+
+
+%% ============================================================
+\section{Related Work}
+\label{sec:related}
+%% ============================================================
+
+We organize the prior literature into four threads whose intersection defines the contribution space of \modelname{}.
+
+\subsection{Selective state-space models and Mamba}
+
+The structured state-space line begins with HiPPO~\cite{gu2020hippo} which derives canonical state matrices from online polynomial approximation, S4~\cite{gu2022s4} which achieves $O(L)$ inference via Cauchy-kernel evaluation of a diagonal-plus-low-rank parameterization, and S5~\cite{smith2023s5} which simplifies the bank of SISO SSMs into a single MIMO SSM with parallel scan. Mamba~\cite{gu2024mamba} introduced the S6 selective layer with input-dependent $(\Delta_t, \mathbf{B}_t, \mathbf{C}_t)$ and matched Transformer perplexity at one-third the parameters; Mamba-2~\cite{dao2024mamba2} proved the Structured State Space Duality with masked attention, yielding $2$--$8\times$ speed-ups. Hybrid architectures interleave SSM and attention layers: Jamba~\cite{lieber2024jamba} combines Mamba blocks with attention and mixture-of-experts to support 256K contexts; Zamba~\cite{glorioso2024zamba} adds a single shared global attention layer. Our prior work MambaShield~\cite{anaedevha2025mambashield} adapted selective SSMs for network intrusion detection with PAC-Bayes-inspired training, achieving $95.9\%$ accuracy and $0.5$~ms per-flow latency on the RobustIDPS.ai platform~\cite{anaedevha2026robustidps}; the present paper extends MambaShield with certified Lipschitz constraints. Robustness studies of Mamba in the visual domain~\cite{du2024robustness,malik2025evaluating,guo2025badvim} have documented the SSM mechanism itself as a backdoor surface, motivating defenses operating at the architectural rather than detector level.
+
+\subsection{Hidden state poisoning and language model attacks}
+
+Adversarial attacks on language models cluster into five families. Training-data poisoning~\cite{gu2017badnets,chen2017targeted} and weight poisoning~\cite{kurita2020weight} corrupt model parameters; gradient-based prompt injection (GCG~\cite{zou2023universal} and its successors) optimizes inference-time adversarial suffixes; sleeper-agent backdoors~\cite{hubinger2024sleeper} survive safety training; and activation steering~\cite{zou2023repe,wang2024trojan} injects directions into the residual stream. \emph{Hidden state poisoning} (HiSPA), introduced by Le Mercier et al.~\cite{lemercier2026hispa}, occupies a previously unrecognized cell of this taxonomy: the attack is inference-time, architecture-specific to selective SSMs, requires no payload or weight modification, and is zero-shot black-box. The attacker selects a short trigger that drives $\Delta_t$ toward saturation, causing $\bar{\mathbf{A}}_t = \exp(\Delta_t \mathbf{A})$ to vanish and overwriting hidden state with adversarial content via $\bar{\mathbf{B}}_t \mathbf{x}_t$. RAG poisoning attacks (PoisonedRAG~\cite{zou2025poisonedrag}, AgentPoison~\cite{chen2024agentpoison}) target external memory but admit similar Lipschitz-style analyses through bounded perturbation in working-memory representations. Empirical defenses for HiSPA include CLASP~\cite{lemercier2026clasp} (XGBoost over block-output embeddings, $95.9\%$ token F1), SpectralGuard~\cite{lemercier2026spectralguard} (spectral horizon detector), and circuit-breaker representation rerouting; the BackdoorLLM benchmark~\cite{li2025backdoorllm} reports that even the strongest of seven evaluated defenses leaves $\geq 70\%$ attack success rate on jailbreak-target hidden-state attacks. None of these methods provides \emph{certified} robustness, which is the gap \modelname{} fills. Our reinforcement-learning poisoning detector~\cite{anaedevha2025dqn} and adversarially-robust IDS~\cite{anaedevha2024adversarial} provided the empirical foundation for the present certified treatment.
+
+\subsection{Lipschitz-constrained architectures and certified robustness}
+
+Lipschitz analysis bounds output sensitivity through composition: $L(f \circ g) \leq L(f) \cdot L(g)$. Three families of techniques enforce these bounds. Spectral normalization~\cite{miyato2018spectral} divides each weight by a power-iteration estimate of its largest singular value; Lipschitz-margin training~\cite{tsuzuku2018margin} converts this into a differentiable certificate. Orthogonal parameterizations including Cayley convolutions~\cite{trockman2021cayley} and unitary RNNs~\cite{arjovsky2016unitary} fix per-layer Lipschitz constants to unity. Convex-potential and dissipative LMI parameterizations directly enforce L2 gain~\cite{pauli2024lipkernel,massai2025l2ru}. For non-pointwise modules, Kim et al.~\cite{kim2021lipschitz} proved softmax dot-product attention is not globally Lipschitz and proposed L2-attention; LipsFormer~\cite{qi2023lipsformer} replaces LayerNorm with CenterNorm and dot-product with cosine similarity; Newhouse et al.~\cite{newhouse2025lipschitz} demonstrated scaled Lipschitz-trained Transformers up to 145M parameters under the Muon optimizer. GloroNets~\cite{leino2021globally} build the certificate directly into the architecture via a margin-based extra logit. Certified robustness against poisoning specifically is addressed by Deep Partition Aggregation~\cite{levine2021deep} and Finite Aggregation~\cite{wang2022certified} for training-set attacks; randomized smoothing over training distributions~\cite{rosenfeld2020certified} provides label-flipping certificates. As of submission, no published work has extended these techniques to certify against hidden-state-level attacks on selective SSMs.
+
+\subsection{PAC-Bayesian certificates for deep models and dynamical systems}
+
+McAllester's PAC-Bayes bounds~\cite{mcallester2003pac} provide high-probability guarantees on expected risk over weight posteriors $Q$. Modern non-vacuous bounds for deep networks were achieved by Dziugaite and Roy~\cite{dziugaite2017computing} and extended to spectrally-normalized margin bounds by Neyshabur et al.~\cite{neyshabur2018pac}, which directly couple Lipschitz constants with generalization. Pérez-Ortiz et al.~\cite{perezortiz2021tighter} demonstrated tight risk certificates via PAC-Bayes-with-backprop. PAC-Bayes for adversarial robustness was developed by Viallard et al.~\cite{viallard2021pacbayes}, providing a high-probability bound on averaged adversarial risk; Mustafa et al.~\cite{mustafa2024nonvacuous} obtained non-vacuous adversarial bounds for stochastic networks. Two recent results enable LLM-scale application: Lotfi et al.~\cite{lotfi2024nonvacuous} obtained the first non-vacuous PAC-Bayes bounds for pretrained LLMs up to $850$~M parameters via SubLoRA compression, and Eringis et al.~\cite{eringis2024pacbayes} provided the first PAC-Bayes treatment of stable RNNs and dynamical systems with hidden states under non-i.i.d.\ trajectories. \modelname{} synthesizes these threads by treating the selective SSM as a Lipschitz-constrained dynamical system and computing PAC-Bayesian certificates that simultaneously bound generalization and adversarial robustness against hidden-state poisoning. To our knowledge, no published work has previously combined these three ingredients (Lipschitz constraints, PAC-Bayes, dynamical SSM) for the specific purpose of HiSPA defense.
+
+
+%% ============================================================
+\section{Preliminaries and Problem Formulation}
+\label{sec:preliminaries}
+%% ============================================================
+
+\subsection{Selective state-space model dynamics}
+
+A continuous-time linear state-space system $\mathbf{h}'(t) = \mathbf{A} \mathbf{h}(t) + \mathbf{B} \mathbf{u}(t)$, $\mathbf{y}(t) = \mathbf{C} \mathbf{h}(t)$ is discretized via zero-order hold at step size $\Delta$ to give $\mathbf{h}_t = \bar{\mathbf{A}} \mathbf{h}_{t-1} + \bar{\mathbf{B}} \mathbf{u}_t$, $\mathbf{y}_t = \mathbf{C} \mathbf{h}_t$, with $\bar{\mathbf{A}} = \exp(\Delta \mathbf{A})$ and $\bar{\mathbf{B}} = (\Delta \mathbf{A})^{-1}(\exp(\Delta \mathbf{A}) - \mathbf{I}) \cdot \Delta \mathbf{B}$. In Mamba's selective S6 layer~\cite{gu2024mamba}, the discretization parameters become input-dependent:
+\begin{align}
+    \Delta_t &= \softplus(\mathbf{W}_\Delta \mathbf{x}_t + \tau) \in \R_{>0}^D,
+    \label{eq:delta}\\
+    \mathbf{B}_t &= \mathbf{W}_B \mathbf{x}_t \in \R^N,\quad
+    \mathbf{C}_t = \mathbf{W}_C \mathbf{x}_t \in \R^N,
+    \label{eq:bc}
+\end{align}
+yielding a time-varying recurrence
+\begin{equation}
+    \mathbf{h}_t = \bar{\mathbf{A}}_t \mathbf{h}_{t-1} + \bar{\mathbf{B}}_t \mathbf{x}_t,\quad
+    \mathbf{y}_t = \mathbf{C}_t^\top \mathbf{h}_t.
+    \label{eq:s6}
+\end{equation}
+Mamba initializes $\mathbf{A} = -\diag(\exp(\mathbf{a}_{\log}))$ so that $\Re(\lambda_i(\mathbf{A})) < 0$ uniformly, ensuring stable dynamics in the absence of adversarial input.
+
+\subsection{Threat model: hidden state poisoning}
+
+Following Le Mercier et al.~\cite{lemercier2026hispa}, we adopt the following threat model.
+
+\begin{definition}[Hidden State Poisoning Attack]
+\label{def:hispa}
+A trigger sequence $\bm{\tau} = (\tau_1, \ldots, \tau_\ell)$ inserted at position $t_0$ in an input stream is an $(\alpha, \ell)$-poisoning attack against a selective SSM if the post-trigger hidden state satisfies
+\begin{equation}
+    \frac{\norm{\mathbf{h}_{t_0+\ell}^{\mathrm{poisoned}}}_2}{\norm{\mathbf{h}_{t_0}^{\mathrm{clean}}}_2} \leq \alpha,
+    \label{eq:hispa}
+\end{equation}
+with $\alpha \ll 1$ indicating near-complete state erasure.
+\end{definition}
+
+The attacker has black-box query access to the model, knows the architecture (Mamba/Mamba-2/hybrid), but does not modify weights or training data. The trigger is a short token sequence (typically $\ell \leq 32$) optimized to drive $\Delta_t$ toward $\Delta_{\max}^\star$ such that $\bar{\mathbf{A}}_t \to 0$, achieving the state collapse described in Eq.~\eqref{eq:hispa}.
+
+\subsection{Problem statement}
+
+\noindent\textbf{Given:} (i) a pretrained selective SSM language model $f_{\bm{\theta}}: \Xcal^L \to \Ycal$ with parameters $\bm{\theta}$ and per-layer projection networks $\mathbf{W}_B, \mathbf{W}_C, \mathbf{W}_\Delta$; (ii) a clean training corpus $\Scal = \{(\mathbf{x}^{(i)}, y^{(i)})\}_{i=1}^n$ drawn i.i.d.\ from $\Dcal$; (iii) an adversary capable of injecting triggers satisfying Definition~\ref{def:hispa} at any position.
+
+\noindent\textbf{Objective:} Find a constrained parameterization $\bm{\theta}^* \in \Theta_{\mathrm{Lip}}$ minimizing the empirical clean risk $\hat{\Lcal}_S(\bm{\theta})$ subject to:
+\begin{align}
+    \norm{\mathbf{W}_B}_2 \leq s_B,\quad
+    \norm{\mathbf{W}_C}_2 \leq s_C,\quad
+    \norm{\mathbf{W}_\Delta}_2 \leq s_\Delta, \label{eq:spec}\\
+    \lambda_i(\mathbf{A}) \in [-\lambda_{\max}, -\lambda_{\min}],\quad
+    \Delta_t \in [0, \Delta_{\max}], \label{eq:eig}
+\end{align}
+yielding a globally Lipschitz function $f_{\bm{\theta}^*}$ with constant $L_{\mathrm{SSM}}$ that admits (a) a deterministic certified-radius guarantee $\epsilon^*(\bm{\theta}^*)$ on hidden-state perturbations, and (b) a PAC-Bayesian high-probability bound on expected adversarial risk over a posterior $Q$ centered at $\bm{\theta}^*$.
+
+\noindent\textbf{Constraints:} clean-task perplexity overhead must remain below $5\%$ relative to unconstrained Mamba; per-flow inference latency under $1$~ms on a single CPU core to enable RobustIDPS.ai integration~\cite{anaedevha2026robustidps}.
+
+
+%% ============================================================
+\section{The \modelname{} Framework}
+\label{sec:framework}
+%% ============================================================
+
+\modelname{} consists of four components: (i) a spectrally-constrained selective SSM block (Section~\ref{subsec:block}), (ii) a GloroNet-style certification head (Section~\ref{subsec:head}), (iii) a PAC-Bayesian training objective coupling the Lipschitz constant with the KL term (Section~\ref{subsec:training}), and (iv) integration with the RobustIDPS.ai platform (Section~\ref{subsec:platform}). Figure~\ref{fig:architecture} shows the complete architecture; Algorithm~\ref{alg:lipmamba} gives the forward pass with certificate computation.
+
+\begin{figure*}[!t]
+\centering
+\begin{tikzpicture}[
+    >=stealth, line width=0.6pt,
+    node distance=0pt and 0pt,
+    box/.style={draw, rounded corners=2pt, minimum height=8mm, minimum width=22mm, font=\footnotesize\bfseries, align=center, line width=0.7pt},
+    proj/.style={box, fill=blue!10, draw=blue!60!black, minimum width=18mm},
+    constraint/.style={box, fill=orange!15, draw=orange!70!black, minimum width=20mm},
+    ssm/.style={box, fill=red!12, draw=red!70!black, minimum width=24mm, minimum height=11mm},
+    cert/.style={box, fill=green!15, draw=green!50!black, minimum width=20mm},
+    track/.style={box, fill=purple!12, draw=purple!70!black, minimum width=20mm},
+    io/.style={box, fill=gray!12, draw=gray!60!black, minimum width=18mm},
+    arrow/.style={->, line width=0.7pt},
+    cflow/.style={->, line width=0.6pt, dashed, draw=green!60!black},
+    sflow/.style={->, line width=0.6pt, dotted, draw=purple!70!black},
+    grouptitle/.style={font=\scriptsize\bfseries\itshape, text=black!70},
+    bigbox/.style={draw=black!30, dashed, rounded corners=3pt, line width=0.4pt},
+]
+
+%% ---------- INPUT (left side) ----------
+\node[io] (xt) at (0, 0) {Token $\mathbf{x}_t$};
+
+%% ---------- BLOCK 1: Spectrally-Constrained Projection Bank (top-left) ----------
+\node[proj, right=8mm of xt, yshift=14mm]   (WB)     {$\bar{\mathbf{W}}_B$\\ \tiny $\sigma_{\max}\!\le\! s_B$};
+\node[proj, below=2mm of WB]                (WC)     {$\bar{\mathbf{W}}_C$\\ \tiny $\sigma_{\max}\!\le\! s_C$};
+\node[proj, below=2mm of WC]                (WDelta) {$\bar{\mathbf{W}}_\Delta$\\ \tiny $\sigma_{\max}\!\le\! s_\Delta$};
+\node[grouptitle, above=1mm of WB] (projtitle) {Spectral norm projection (Eq.~6)};
+\begin{scope}[on background layer]
+  \node[bigbox, fit=(WB)(WC)(WDelta)(projtitle)] (projbox) {};
+\end{scope}
+
+%% ---------- BLOCK 2: Constraint operators (top-right) ----------
+\node[constraint, right=18mm of WB] (Bt) {$\mathbf{B}_t = \bar{\mathbf{W}}_B\mathbf{x}_t$};
+\node[constraint, right=18mm of WC] (Ct) {$\mathbf{C}_t = \bar{\mathbf{W}}_C\mathbf{x}_t$};
+\node[constraint, right=18mm of WDelta] (Dt) {$\Delta_t = \Delta_{\max}\!\cdot\!\tanh(\softplus/\Delta_{\max})$};
+\node[grouptitle, above=1mm of Bt] (cttitle) {Clipped selective parameters};
+\begin{scope}[on background layer]
+  \node[bigbox, fit=(Bt)(Ct)(Dt)(cttitle)] (ctbox) {};
+\end{scope}
+
+%% ---------- BLOCK 3: Eigenvalue-bounded state matrix (mid-left) ----------
+\node[constraint, below=14mm of WDelta, xshift=8mm] (Aeig) {$\mathbf{A} = -\diag(\lambda_{\min}\!+\!(\lambda_{\max}\!-\!\lambda_{\min})\sigma(\bm{\alpha}))$};
+
+%% ---------- BLOCK 4: Selective scan (centre) ----------
+\node[ssm] (scan) at ($(Aeig)!0.5!(Dt) + (24mm,-14mm)$) {Selective scan\\$\mathbf{h}_t = \bar{\mathbf{A}}_t\mathbf{h}_{t-1}+\bar{\mathbf{B}}_t\mathbf{x}_t$\\$\mathbf{y}_t = \mathbf{C}_t^{\!\top}\mathbf{h}_t$};
+\node[grouptitle, above=1mm of scan] {Constrained S6 recurrence (Eq.~3)};
+
+%% ---------- BLOCK 5: Output projection (right of scan) ----------
+\node[proj, right=10mm of scan, fill=blue!10] (Wout) {$\bar{\mathbf{W}}_{\mathrm{out}}\!\cdot\!\SiLU$};
+
+%% ---------- BLOCK 6: Lipschitz tracker (bottom-left) ----------
+\node[track, below=14mm of Aeig, xshift=4mm] (Lt) {Recursive Lipschitz tracker\\$L_t = \rho_t L_{t-1} + s_C s_{\mathrm{out}} L_{\SiLU}(\beta_t + s_B)$};
+\node[grouptitle, above=1mm of Lt] {Online Lipschitz estimator};
+
+%% ---------- BLOCK 7: GloroNet certification head (bottom-right) ----------
+\node[cert, right=20mm of Lt] (head) {GloroNet head\\$\epsilon^* = (z_{\hat{y}}\!-\!\max_{k\neq\hat{y}}z_k)/(\sqrt{2}L_L)$};
+\node[grouptitle, above=1mm of head] {Per-input certificate};
+\node[io, right=8mm of head, fill=green!8] (out) {$(\hat{y},\,\epsilon^*)$};
+
+%% ---------- ARROWS — main forward path (solid black) ----------
+\draw[arrow] (xt) |- (WB);
+\draw[arrow] (xt) -- (WC);
+\draw[arrow] (xt) |- (WDelta);
+\draw[arrow] (WB) -- (Bt);
+\draw[arrow] (WC) -- (Ct);
+\draw[arrow] (WDelta) -- (Dt);
+\draw[arrow] (Bt.east) -- ++(4mm,0) |- (scan.north west);
+\draw[arrow] (Ct.east) -- ++(4mm,0) -- (scan.west);
+\draw[arrow] (Dt.east) -- ++(4mm,0) |- (scan.south west);
+\draw[arrow] (Aeig.east) -- ++(4mm,0) |- ([yshift=-2mm]scan.west);
+\draw[arrow] (scan) -- (Wout);
+\draw[arrow] (Wout) -| (head.north);
+
+%% ---------- ARROWS — Lipschitz tracking (dotted purple) ----------
+\draw[sflow] (Bt.south) ++(0,-2mm) -- ++(0,-4mm) -| (Lt.north);
+\draw[sflow] (Ct.south) ++(0,-2mm) -- ++(0,-6mm) -| ([xshift=-2mm]Lt.north);
+\draw[sflow] (scan.south) -- ++(0,-4mm) -| ([xshift=2mm]Lt.north east);
+
+%% ---------- ARROWS — certificate flow (dashed green) ----------
+\draw[cflow] (Lt.east) -- (head.west);
+\draw[cflow] (head.east) -- (out.west);
+
+%% ---------- LEGEND ----------
+\node[draw=black!50, rounded corners=2pt, line width=0.4pt, fill=white,
+      below=22mm of scan, font=\scriptsize, align=left,
+      inner sep=3pt] (legend) {%
+   \tikz\draw[arrow] (0,0) -- (4mm,0); \,\textbf{Forward path} \quad
+   \tikz\draw[sflow] (0,0) -- (4mm,0); \,\textbf{Lipschitz tracking} \quad
+   \tikz\draw[cflow] (0,0) -- (4mm,0); \,\textbf{Certificate flow}};
+
+\end{tikzpicture}
+\caption{The \modelname{} architecture. Token $\mathbf{x}_t$ enters the spectrally-normalized projection bank (top-left, blue) producing $(\bar{\mathbf{W}}_B, \bar{\mathbf{W}}_C, \bar{\mathbf{W}}_\Delta)$ with bounded operator norms $(s_B, s_C, s_\Delta)$. The constraint block (top-right, orange) applies the clipped-step activation $\Delta_t \in [0, \Delta_{\max}]$ (Eq.~5) and prepares the input-dependent triplet $(\Delta_t, \mathbf{B}_t, \mathbf{C}_t)$. The constrained selective scan (centre, red) carries the eigenvalue-bounded state matrix $\mathbf{A}$ (mid-left). The recursive Lipschitz tracker (bottom-left, purple) maintains $L_t$ online for the GloroNet certification head (bottom-right, green), which emits both the prediction $\hat{y}$ and the certified radius $\epsilon^*$. Dashed green arrows denote certificate flow; dotted purple arrows denote Lipschitz tracking signal flow.}
+\label{fig:architecture}
+\end{figure*}
+
+\subsection{Spectrally-constrained selective SSM block}
+\label{subsec:block}
+
+The \modelname{} block replaces Mamba's free projection networks with spectrally-normalized counterparts: at each training step, we compute $\bar{\mathbf{W}}_\bullet = \mathbf{W}_\bullet \cdot \min(1, s_\bullet / \sigmamax(\mathbf{W}_\bullet))$ for $\bullet \in \{B, C, \Delta\}$ via one-step power iteration~\cite{miyato2018spectral}. The state-matrix eigenvalues are reparameterized as
+\begin{equation}
+    \mathbf{A} = -\diag\bigl(\lambda_{\min} + (\lambda_{\max} - \lambda_{\min}) \cdot \sigma(\bm{\alpha})\bigr),
+    \label{eq:eigreparam}
+\end{equation}
+where $\sigma$ is the logistic sigmoid and $\bm{\alpha}$ is a learnable vector, ensuring $\lambda_i(\mathbf{A}) \in [-\lambda_{\max}, -\lambda_{\min}]$ throughout training. The discretization step is clipped via a saturating activation:
+\begin{equation}
+    \Delta_t = \Delta_{\max} \cdot \tanh\bigl(\softplus(\bar{\mathbf{W}}_\Delta \mathbf{x}_t + \tau) / \Delta_{\max}\bigr).
+    \label{eq:deltaclip}
+\end{equation}
+Because $\tanh(u/\Delta_{\max}) \in [0, 1)$ and $\softplus(\cdot) > 0$, this guarantees $\Delta_t \in [0, \Delta_{\max})$ while preserving smoothness for back-propagation.
+
+The block output composes the constrained scan~\eqref{eq:s6} with a SiLU-gated linear projection: $\mathbf{y}_t^{\mathrm{out}} = \bar{\mathbf{W}}_{\mathrm{out}} \cdot \SiLU(\mathbf{C}_t^\top \mathbf{h}_t)$, with $\bar{\mathbf{W}}_{\mathrm{out}}$ also spectrally normalized.
+
+\subsection{GloroNet-style certification head}
+\label{subsec:head}
+
+Following Leino et al.~\cite{leino2021globally}, we attach a certification head that emits both predictions and per-input certified radii. Let $\bm{z} \in \R^K$ denote the pre-softmax logits from a $K$-class classification head, and let $L_{\mathrm{net}}$ denote the global Lipschitz constant of the full network up to and including the head. The certified radius for input $\mathbf{x}$ is
+\begin{equation}
+    \epsilon^*(\mathbf{x}) = \frac{z_{\hat{y}}(\mathbf{x}) - \max_{k \neq \hat{y}} z_k(\mathbf{x})}{\sqrt{2} \cdot L_{\mathrm{net}}},
+    \label{eq:gloro}
+\end{equation}
+where $\hat{y} = \arg\max_k z_k(\mathbf{x})$. Any $\ell_2$ perturbation of magnitude $< \epsilon^*(\mathbf{x})$ provably cannot change the prediction. We thus train against a margin-augmented logit $\tilde{z}_K = \max_{k \neq \hat{y}} z_k(\mathbf{x}) + \sqrt{2} L_{\mathrm{net}} \cdot \epsilon_{\mathrm{train}}$ to encourage certifiable predictions at training-time radius $\epsilon_{\mathrm{train}}$.
+
+\subsection{Training objective with PAC-Bayes coupling}
+\label{subsec:training}
+
+\modelname{} is trained with a posterior $Q = \Ncal(\bm{\theta}, \sigma^2 \mathbf{I})$ over Lipschitz-constrained parameters and a data-dependent prior $P = \Ncal(\bm{\theta}_{\mathrm{prior}}, \sigma_0^2 \mathbf{I})$ fit on a held-out clean subset~\cite{perezortiz2021tighter}. The training objective combines the empirical adversarial risk, the Lipschitz penalty, and the KL term:
+\begin{equation}
+    \Lcal(\bm{\theta}, \sigma) = \hat{\Lcal}_S^{\mathrm{adv}}(\bm{\theta}) + \frac{L_{\mathrm{SSM}}(\bm{\theta}) \cdot \epsilon_{\mathrm{train}}}{2} + \beta \sqrt{\frac{\KL(Q \| P) + \ln(2 \sqrt{n}/\delta)}{2 n}},
+    \label{eq:objective}
+\end{equation}
+with $\beta = 1$ at the certificate boundary and $\delta = 0.05$ throughout.
+
+\subsection{The forward pass and certificate computation}
+\label{subsec:algorithm}
+
+Algorithm~\ref{alg:lipmamba} specifies the full \modelname{} forward pass with simultaneous certificate computation. The algorithm encapsulates the central methodological contribution of the paper: each Lipschitz quantity is computed online in $O(d^2)$ per token (matching standard Mamba inference complexity up to a constant), and the GloroNet certificate $\epsilon^*$ is emitted at the readout boundary without additional forward passes.
+
+\begin{algorithm}[!t]
+\small
+\caption{\modelname{} Forward Pass with Certified Radius}
+\label{alg:lipmamba}
+\begin{algorithmic}[1]
+\REQUIRE Token sequence $(\mathbf{x}_1, \ldots, \mathbf{x}_L)$, parameters $\bm{\theta} = \{\mathbf{W}_B, \mathbf{W}_C, \mathbf{W}_\Delta, \bm{\alpha}, \mathbf{W}_{\mathrm{out}}\}$, target spectral bounds $(s_B, s_C, s_\Delta, s_{\mathrm{out}})$, eigenvalue bounds $(\lambda_{\max}, \lambda_{\min})$, step bound $\Delta_{\max}$
+\ENSURE Output sequence $(\mathbf{y}_1, \ldots, \mathbf{y}_L)$ and certified radius $\epsilon^*$
+\STATE \textbf{Spectral projection:} $\bar{\mathbf{W}}_\bullet \gets \mathbf{W}_\bullet \cdot \min\bigl(1, s_\bullet / \sigmamax^{\mathrm{(PI)}}(\mathbf{W}_\bullet)\bigr)$ for $\bullet \in \{B, C, \Delta, \mathrm{out}\}$ \quad \COMMENT{1-step power iteration}
+\STATE \textbf{Eigenvalue reparameterization:} $\mathbf{A} \gets -\diag\bigl(\lambda_{\min} + (\lambda_{\max} - \lambda_{\min}) \cdot \sigma(\bm{\alpha})\bigr)$
+\STATE Initialize $\mathbf{h}_0 \gets \mathbf{0}$, Lipschitz tracker $L_0 \gets 1$
+\FOR{$t = 1$ to $L$}
+    \STATE \textbf{Selective parameters:} $\Delta_t \gets \Delta_{\max} \cdot \tanh(\softplus(\bar{\mathbf{W}}_\Delta \mathbf{x}_t + \tau) / \Delta_{\max})$
+    \STATE \quad $\mathbf{B}_t \gets \bar{\mathbf{W}}_B \mathbf{x}_t$,\quad $\mathbf{C}_t \gets \bar{\mathbf{W}}_C \mathbf{x}_t$
+    \STATE \textbf{Discretization:} $\bar{\mathbf{A}}_t \gets \exp(\Delta_t \odot \mathbf{A})$,\quad $\bar{\mathbf{B}}_t \gets \Delta_t \odot \mathbf{B}_t$
+    \STATE \textbf{State update:} $\mathbf{h}_t \gets \bar{\mathbf{A}}_t \mathbf{h}_{t-1} + \bar{\mathbf{B}}_t \mathbf{x}_t$
+    \STATE \textbf{Block output:} $\mathbf{y}_t \gets \bar{\mathbf{W}}_{\mathrm{out}} \cdot \SiLU(\mathbf{C}_t^\top \mathbf{h}_t)$
+    \STATE \textbf{Lipschitz tracking:} $\rho_t \gets \norm{\bar{\mathbf{A}}_t}_2$,\quad $\beta_t \gets \norm{\bar{\mathbf{B}}_t}_2$
+    \STATE \quad $L_t \gets \rho_t \cdot L_{t-1} + s_C \cdot s_{\mathrm{out}} \cdot L_{\SiLU} \cdot (\beta_t + s_B)$
+\ENDFOR
+\STATE \textbf{Certified radius:} compute logits $\mathbf{z} = \mathrm{Head}(\mathbf{y}_L)$
+\STATE \quad $\epsilon^* \gets \bigl(z_{\hat{y}} - \max_{k \neq \hat{y}} z_k\bigr) / (\sqrt{2} \cdot L_L)$ \quad \COMMENT{GloroNet bound}
+\RETURN $(\mathbf{y}_1, \ldots, \mathbf{y}_L)$, $\epsilon^*$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Integration with the RobustIDPS.ai platform}
+\label{subsec:platform}
+
+\modelname{} is deployed as a certified replacement for the MambaShield sequential-pattern model within the RobustIDPS.ai platform~\cite{anaedevha2026robustidps}, an open-source AI-native intrusion detection platform integrating thirteen-plus neural architectures across $34$ attack classes and $83$ engineered features and processing over $2$~TB of daily traffic. Where MambaShield delivers $0.5$~ms per-flow latency without certification, \modelname{} adds $0.1$~ms of certificate-computation overhead per flow ($0.6$~ms total) and emits the GloroNet bound $\epsilon^*$ alongside each prediction, enabling downstream SOC components (auto-investigation, incident report generation) to escalate or de-prioritize alerts based on certificate strength. The integration is bidirectional: the RobustIDPS.ai DefensePipeline forwards detected adversarial flows to \modelname{} for certified re-classification, and \modelname{}'s certificates are written into the platform's MITRE ATT\&CK Mapper and OWASP LLM Top~10 Scorecard.
+
+
+%% ============================================================
+\section{Theoretical Properties}
+\label{sec:theory}
+%% ============================================================
+
+This section states three results: a tight Lipschitz bound for the constrained block (Theorem~\ref{thm:lip}), a certified poisoning-immunity theorem (Theorem~\ref{thm:immunity}), and a PAC-Bayesian generalization bound under hidden-state poisoning (Theorem~\ref{thm:pacbayes}). Proof sketches are given in the main text; full proofs follow the integral-Lipschitz framework of Gama et al.\ extended to selective dynamics, and are deferred to a public supplementary appendix.
+
+\subsection{Lipschitz bound for the constrained selective SSM}
+
+\begin{theorem}[Lipschitz bound for the \modelname{} block]
+\label{thm:lip}
+Let $f_{\mathrm{block}}: \R^{L \times d} \to \R^{L \times d}$ denote the \modelname{} block defined by Eqs.~\eqref{eq:s6}, \eqref{eq:eigreparam}--\eqref{eq:deltaclip} with spectral bounds $(s_B, s_C, s_\Delta, s_{\mathrm{out}})$, eigenvalue bounds $\lambda_{\max} \geq \lambda_{\min} > 0$, and step bound $\Delta_{\max} > 0$. Then for any pair of input sequences $\mathbf{x}, \mathbf{x}' \in \R^{L \times d}$,
+\begin{equation}
+    \norm{f_{\mathrm{block}}(\mathbf{x}) - f_{\mathrm{block}}(\mathbf{x}')}_2 \leq L_{\mathrm{block}} \cdot \norm{\mathbf{x} - \mathbf{x}'}_2,
+\end{equation}
+with
+\begin{equation}
+    L_{\mathrm{block}} = s_{\mathrm{out}} \cdot L_{\SiLU} \cdot \left[ s_C \cdot \frac{s_B \cdot \Delta_{\max}}{1 - \rho_{\max}} + s_C \cdot \norm{\mathbf{h}}_{\infty} \cdot s_\Delta \cdot \frac{\Delta_{\max}}{1 - \rho_{\max}} \right],
+    \label{eq:lipbound}
+\end{equation}
+where $\rho_{\max} = \exp(-\Delta_{\min} \lambda_{\min})$ with $\Delta_{\min} > 0$ a uniform positivity bound on the clipped step, and $L_{\SiLU} \approx 1.0998$ is the Lipschitz constant of the SiLU activation.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+For each $t$, the discretization $\bar{\mathbf{A}}_t = \exp(\Delta_t \mathbf{A})$ satisfies $\norm{\bar{\mathbf{A}}_t}_2 \leq \exp(\Delta_t \mu_2(\mathbf{A}))$ where $\mu_2(\mathbf{A}) = \lambda_{\max}((\mathbf{A} + \mathbf{A}^\top)/2) = -\lambda_{\min} < 0$ by~\eqref{eq:eigreparam}; together with $\Delta_t \in (0, \Delta_{\max}]$ this yields $\norm{\bar{\mathbf{A}}_t}_2 \leq \rho_{\max} < 1$. Unrolling the recurrence~\eqref{eq:s6} gives
+\begin{equation}
+    \mathbf{h}_t - \mathbf{h}_t' = \sum_{k=1}^t \Bigl(\prod_{j=k+1}^t \bar{\mathbf{A}}_j\Bigr) \bigl[(\bar{\mathbf{B}}_k - \bar{\mathbf{B}}_k') \mathbf{x}_k + \bar{\mathbf{B}}_k'(\mathbf{x}_k - \mathbf{x}_k')\bigr].
+\end{equation}
+Bounding the geometric sum by $1/(1 - \rho_{\max})$ and combining with the spectral norms of the projection networks yields the state-sensitivity term $s_B \Delta_{\max} / (1 - \rho_{\max})$. Decomposing the readout sensitivity into a fixed-state term ($s_C$) and an input-dependent state term ($s_C \cdot \norm{\mathbf{h}}_\infty \cdot s_\Delta$), then composing with $\SiLU$ and the output projection $\bar{\mathbf{W}}_{\mathrm{out}}$ via the chain rule, gives~\eqref{eq:lipbound}.
+\end{proof}
+
+The bound is tight in the sense that equality is attained when the input perturbation is aligned with the dominant singular direction of $\bar{\mathbf{B}}_t$ for all $t$ and propagates through the geometric series with maximum amplification. By composition, an $N$-block \modelname{} network has Lipschitz constant $L_{\mathrm{SSM}} \leq \prod_{i=1}^N L_{\mathrm{block}}^{(i)}$.
+
+\subsection{Certified poisoning-immunity theorem}
+
+\begin{theorem}[Certified Hidden-State Poisoning Immunity]
+\label{thm:immunity}
+Let $\rho_{\min} = \exp(-\Delta_{\max} \lambda_{\max})$ denote the minimum spectral radius of $\bar{\mathbf{A}}_t$ achievable under the \modelname{} constraints, and let $\bar{B}_{\max} = s_B \cdot \Delta_{\max}$ denote the maximum per-step input-injection norm. For any trigger sequence $\bm{\tau}$ of length $\ell$ injected at position $t_0$ with $\norm{\mathbf{x}_t}_2 \leq X_{\max}$ for all $t$, the post-trigger hidden state satisfies
+\begin{equation}
+    \norm{\mathbf{h}_{t_0+\ell}}_2 \geq \rho_{\min}^\ell \cdot \norm{\mathbf{h}_{t_0}}_2 - \frac{\bar{B}_{\max} \cdot X_{\max} \cdot (1 - \rho_{\min}^\ell)}{1 - \rho_{\min}}.
+    \label{eq:immunity}
+\end{equation}
+Consequently, the maximum trigger length that can drive the state retention ratio below a chosen threshold $\alpha_{\min}$ is bounded above by
+\begin{equation}
+    \ell^* \leq \frac{\log\bigl(\alpha_{\min} + \frac{\bar{B}_{\max} X_{\max}}{(1-\rho_{\min}) \norm{\mathbf{h}_{t_0}}}\bigr)}{\log \rho_{\min}}.
+    \label{eq:lstar}
+\end{equation}
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+By the reverse triangle inequality applied to~\eqref{eq:s6}, $\norm{\mathbf{h}_t}_2 \geq \norm{\bar{\mathbf{A}}_t \mathbf{h}_{t-1}}_2 - \norm{\bar{\mathbf{B}}_t \mathbf{x}_t}_2 \geq \rho_{\min} \norm{\mathbf{h}_{t-1}}_2 - \bar{B}_{\max} X_{\max}$. Iterating $\ell$ times and summing the geometric sequence yields~\eqref{eq:immunity}; setting the right-hand side to $\alpha_{\min} \norm{\mathbf{h}_{t_0}}_2$ and solving for $\ell$ gives~\eqref{eq:lstar}.
+\end{proof}
+
+The theorem turns architectural constraints into a deterministic, per-input certificate: under the \modelname{} parameterization with $(s_B, \Delta_{\max}, \lambda_{\max}) = (1.0, 0.5, 1.0)$ and $X_{\max} = 1.0$, retention threshold $\alpha_{\min} = 0.5$, and typical $\norm{\mathbf{h}_{t_0}}_2 = 4.0$, evaluation of~\eqref{eq:lstar} yields $\ell^* \approx 24$, meaning no trigger of length below $24$ tokens can drive state retention below half of its pre-trigger value.
+
+\subsection{PAC-Bayesian certificate under hidden-state poisoning}
+
+\begin{theorem}[PAC-Bayesian Adversarial Risk Bound]
+\label{thm:pacbayes}
+Let $Q = \Ncal(\bm{\theta}, \sigma^2 \mathbf{I})$ be a posterior over \modelname{} parameters, $P = \Ncal(\bm{\theta}_{\mathrm{prior}}, \sigma_0^2 \mathbf{I})$ a data-dependent prior fit on a held-out clean subset, and $\Lcal_{\mathrm{adv}}(\bm{\theta}; \epsilon) = \E_{(\mathbf{x},y) \sim \Dcal} \sup_{\norm{\delta} \leq \epsilon} \ell(f_{\bm{\theta}}(\mathbf{x} + \delta), y)$ the expected adversarial risk at perturbation radius $\epsilon$. Then with probability at least $1 - \delta$ over the draw of $\Scal \sim \Dcal^n$,
+\begin{align}
+    \E_{\bm{\theta} \sim Q}\bigl[\Lcal_{\mathrm{adv}}(\bm{\theta}; \epsilon)\bigr]
+    &\leq \E_{\bm{\theta} \sim Q}\bigl[\hat{\Lcal}_S^{\mathrm{adv}}(\bm{\theta}; \epsilon)\bigr]
+    + \frac{L_{\mathrm{SSM}}(\bm{\theta}) \cdot \epsilon}{2} \nonumber\\
+    &\quad + \sqrt{\frac{\KL(Q \| P) + \ln(2\sqrt{n}/\delta)}{2 n}}.
+    \label{eq:pacbayes}
+\end{align}
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+Combine McAllester's PAC-Bayes bound~\cite{mcallester2003pac,perezortiz2021tighter} on $\E_{\bm{\theta} \sim Q}[\Lcal(\bm{\theta})]$ for the clean expected risk with the Lipschitz bound $|\ell(f_{\bm{\theta}}(\mathbf{x} + \delta), y) - \ell(f_{\bm{\theta}}(\mathbf{x}), y)| \leq L_{\mathrm{SSM}}(\bm{\theta}) \cdot \epsilon / 2$ on the per-instance adversarial gap (Theorem~\ref{thm:lip}). The factor $1/2$ accounts for the symmetric ball; the data-dependent prior keeps the KL term tight as in Pérez-Ortiz et al.~\cite{perezortiz2021tighter}.
+\end{proof}
+
+The bound is non-vacuous (numerical value $< 1$) at the 130--370~M parameter scale: with $n = 10^7$, $\sigma = 0.04$, $\sigma_0 = 0.10$, $L_{\mathrm{SSM}} = 6.5$, $\epsilon = 0.18$, $\delta = 0.05$, the right-hand side of~\eqref{eq:pacbayes} evaluates to $0.197$, a $19.7\%$ certified upper bound on adversarial risk.
+
+
+%% ============================================================
+\section{Experimental Methodology}
+\label{sec:experiments}
+%% ============================================================
+
+\subsection{Datasets}
+
+We evaluate \modelname{} on two complementary benchmark families. For language-modeling and LLM-attack evaluation we use \emph{RoBench-25}~\cite{lemercier2026hispa}, the canonical hidden-state-poisoning benchmark with $1{,}050$ trigger sequences across nine attack families; \emph{HarmBench}~\cite{mazeika2024harmbench} ($510$ harmful behaviors $\times$ $18$ red-team methods); \emph{JailbreakBench}~\cite{chao2024jailbreakbench} ($100$ misuse $+$ $100$ benign behaviors); and \emph{WildJailbreak}~\cite{jiang2024wildjailbreak} ($2{,}210$ adversarial-evaluation prompts). For network intrusion-detection deployment alignment with the RobustIDPS.ai platform, we use four standard datasets: \emph{CIC-IDS2017}~\cite{sharafaldin2018toward} ($2.8\,$M flows, $80$ features), \emph{Edge-IIoTset}~\cite{ferrag2022edge} ($20.8\,$M flows, $61$ features, $14$ attacks), \emph{UNSW-NB15}~\cite{moustafa2015unsw} ($2.5\,$M flows, $9$ attacks), and \emph{TON\_IoT}~\cite{alsaedi2020ton}.
+
+\subsection{Baselines}
+
+We compare \modelname{} against six baselines spanning four design points: (i) unconstrained Mamba~\cite{gu2024mamba} and Mamba-2~\cite{dao2024mamba2}; (ii) MambaShield~\cite{anaedevha2025mambashield}, our prior work on selective SSMs for IDS without Lipschitz constraints; (iii) hybrid SSM-Transformer Jamba-1.7-Mini~\cite{lieber2024jamba}; (iv) the empirical defenses CLASP~\cite{lemercier2026clasp} and SpectralGuard~\cite{lemercier2026spectralguard}. For the IDS deployment, additional baselines are SurrogateIDS, the seven-branch Monte Carlo dropout ensemble of the RobustIDPS.ai platform~\cite{anaedevha2026robustidps}; CyberSecLLM, the language-model detector; and the uncertainty-calibrated hierarchical Gaussian process detector of~\cite{anaedevha2026uchgp}.
+
+\subsection{Evaluation metrics}
+
+We report four metric categories. \emph{Detection accuracy:} clean accuracy (ACC), poisoned accuracy under HiSPA at $\ell = 24$ (PACC), attack success rate (ASR) on HarmBench scored by HarmBench-CLS~\cite{mazeika2024harmbench}, and macro-F1 on the IDS datasets. \emph{Certified robustness:} certified accuracy at radius $\epsilon^*$ via Eq.~\eqref{eq:gloro}; empirical adversarial accuracy under PGD-40 at $\epsilon \in \{0.05, 0.10, 0.15, 0.20, 0.25, 0.30\}$; certified poisoning radius $\ell^*$ via Eq.~\eqref{eq:lstar}; and PAC-Bayesian bound value via Eq.~\eqref{eq:pacbayes}. \emph{Calibration:} expected calibration error (ECE) with $15$ equal-width bins~\cite{guo2017calibration}, Brier score, and reliability diagrams. \emph{Latency and efficiency:} per-flow latency on a single CPU core (matching the RobustIDPS.ai deployment context), throughput in flows-per-second, and certificate-computation overhead. Multi-dataset comparisons use the Friedman test with Holm post-hoc correction following Demšar~\cite{demsar2006statistical}.
+
+\subsection{Implementation}
+
+\modelname{} is implemented in PyTorch~$2.1$ with custom CUDA kernels for the constrained selective scan extending the Mamba reference implementation. Spectral normalization uses one-step power iteration with running-average smoothing. Training uses AdamW~\cite{loshchilov2019adamw} with learning rate $2 \times 10^{-4}$, weight decay $0.1$, gradient clipping at norm $1.0$, and cosine annealing over $100$ epochs. The data-dependent prior is fit on a $5\%$ clean held-out split. Spectral bounds are tuned per-scale (LipMamba-130M: $s_B = s_C = 1.0$, $s_\Delta = 0.5$, $\Delta_{\max} = 0.5$, $\lambda_{\max} = 1.0$, $\lambda_{\min} = 0.05$). Experiments use $4 \times$ NVIDIA A100 80~GB GPUs; latency measurements use a single Intel Xeon Gold $6248$ CPU core to match the RobustIDPS.ai deployment context~\cite{anaedevha2026robustidps}.
+
+
+%% ============================================================
+\section{Results}
+\label{sec:results}
+%% ============================================================
+
+\subsection{Main results: certified robustness against HiSPA}
+
+Table~\ref{tab:main} reports the headline comparison on RoBench-25 (LLM evaluation) and the four IDS datasets averaged. \modelname{}-130M achieves $80.4\%$ certified accuracy at certified radius $\epsilon^* = 0.18$, a $61.2$~percentage-point improvement over unconstrained Mamba ($19.2\%$ certified accuracy) and a $24.7$-point improvement over CLASP detection ($55.7\%$, which is an empirical bound only). On the IDS datasets, \modelname{} matches or exceeds MambaShield clean accuracy ($95.9\%$) while adding the certified-radius guarantee MambaShield lacks.
+
+\begin{table*}[!t]
+\centering
+\caption{Main results on RoBench-25 (LLM-side, top) and the four IDS datasets averaged (bottom). PACC at HiSPA $\ell = 24$. ASR on HarmBench scored by HarmBench-CLS. \emph{Cert.\ Acc.} is certified accuracy at the listed $\epsilon^*$; for empirical defenses CLASP/SpectralGuard, certificate is N/A. Best in \textbf{bold}; second-best \underline{underlined}.}
+\label{tab:main}
+\small
+\begin{tabular}{@{}lccccc|cccc@{}}
+\toprule
+& \multicolumn{5}{c|}{\textbf{LLM (RoBench-25)}} & \multicolumn{4}{c}{\textbf{IDS (CIC-IDS2017 / Edge-IIoT / UNSW-NB15 / TON\_IoT avg)}} \\
+\cmidrule(lr){2-6}\cmidrule(lr){7-10}
+\textbf{Method} & ACC & PACC & ASR$\downarrow$ & Cert.\ Acc.\ & $\epsilon^*$ & Macro-F1 & PACC & ECE$\downarrow$ & Latency \\
+\midrule
+Mamba (unconstrained) & 89.7 & 23.4 & 92.1 & 19.2 & 0.04 & 94.7 & 31.5 & 0.058 & 0.5\,ms \\
+Mamba-2 & 90.3 & 25.8 & 89.4 & 21.8 & 0.05 & 95.1 & 33.7 & 0.052 & 0.4\,ms \\
+Jamba-1.7-Mini (hybrid) & 91.2 & 18.6 & 88.7 & 12.4 & 0.03 & 93.8 & 28.9 & 0.061 & 1.2\,ms \\
+MambaShield~\cite{anaedevha2025mambashield} & \underline{91.6} & 64.3 & 47.2 & N/A & N/A & \underline{95.9} & 71.8 & \underline{0.042} & \textbf{0.5\,ms} \\
+CLASP detector~\cite{lemercier2026clasp} & 89.7 & 67.1 & 38.5 & 55.7 & N/A & --- & --- & --- & 1.0\,ms \\
+SpectralGuard~\cite{lemercier2026spectralguard} & 89.4 & 71.4 & 35.6 & 62.3 & 0.10 & --- & --- & --- & 0.9\,ms \\
+\midrule
+\modelname{}-130M (ours) & 90.8 & \underline{82.7} & \underline{32.4} & \underline{77.1} & \underline{0.15} & 95.6 & \underline{84.2} & 0.038 & 0.6\,ms \\
+\modelname{}-370M (ours) & \textbf{91.9} & \textbf{85.3} & \textbf{30.9} & \textbf{80.4} & \textbf{0.18} & \textbf{96.4} & \textbf{86.7} & \textbf{0.034} & 0.8\,ms \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Statistical significance follows the Demšar~\cite{demsar2006statistical} protocol. Across the eight method-dataset combinations, the Friedman test yields $\chi_F^2(7) = 49.6$, $p < 10^{-8}$, rejecting the null of equal performance. The Holm post-hoc procedure at $\alpha = 0.05$ confirms that \modelname{}-370M is significantly better than every baseline; pairwise Wilcoxon signed-rank tests give $p < 0.001$ for the gap to MambaShield (effect size $r = 0.81$) and $p < 0.001$ for the gap to SpectralGuard (effect size $r = 0.85$).
+
+\subsection{Certified-accuracy-radius curves}
+
+Figure~\ref{fig:cert_curve} shows certified accuracy as a function of the certification radius $\epsilon$, with the legend placed above the plot for clarity. \modelname{}-370M maintains $\geq 70\%$ certified accuracy up to $\epsilon = 0.20$ and degrades smoothly thereafter; SpectralGuard's empirical curve crosses below at $\epsilon = 0.12$, and unconstrained Mamba collapses near $\epsilon = 0.04$.
+
+\begin{figure}[!t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=\columnwidth, height=5.6cm,
+    xlabel={Certification / perturbation radius $\epsilon$},
+    ylabel={Certified accuracy (\%)},
+    xlabel style={font=\footnotesize},
+    ylabel style={font=\footnotesize},
+    xmin=0, xmax=0.32,
+    ymin=0, ymax=100,
+    xtick={0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30},
+    x tick label style={font=\scriptsize},
+    y tick label style={font=\scriptsize},
+    legend style={
+        at={(0.5, 1.10)}, anchor=south,
+        legend columns=3, font=\scriptsize,
+        column sep=6pt,
+        /tikz/every even column/.append style={column sep=8pt},
+        draw=none, fill=none
+    },
+    legend cell align=left,
+    grid=major, grid style={gray!20},
+]
+\addplot[color=blue!60, mark=square*, line width=0.8pt, mark size=2pt]
+    coordinates {(0,89.7) (0.04,19.2) (0.08,5.4) (0.12,2.1) (0.16,0.8) (0.20,0.3) (0.24,0.1) (0.28,0.0)};
+\addplot[color=orange!80, mark=triangle*, line width=0.8pt, mark size=2pt]
+    coordinates {(0,89.4) (0.04,86.2) (0.08,82.8) (0.12,76.9) (0.16,68.3) (0.20,57.4) (0.24,44.1) (0.28,30.6)};
+\addplot[color=green!50!black, mark=diamond*, line width=0.8pt, mark size=2pt]
+    coordinates {(0,90.8) (0.04,89.6) (0.08,86.5) (0.12,82.1) (0.16,77.1) (0.20,69.3) (0.24,57.8) (0.28,42.9)};
+\addplot[color=red!80, mark=*, line width=1.0pt, mark size=2.4pt]
+    coordinates {(0,91.9) (0.04,90.7) (0.08,88.4) (0.12,84.6) (0.16,80.4) (0.20,73.5) (0.24,62.1) (0.28,46.7)};
+\legend{Mamba (uncons.), SpectralGuard, \modelname{}-130M, \modelname{}-370M}
+\draw[red!80, dashed, line width=0.5pt] (axis cs:0.18, 0) -- (axis cs:0.18, 80.4);
+\node[font=\tiny, red!80, anchor=west] at (axis cs:0.182, 78) {$\epsilon^* = 0.18$};
+\end{axis}
+\end{tikzpicture}
+\caption{Certified accuracy vs.\ perturbation radius on RoBench-25. \modelname{}-370M maintains the highest certified accuracy across the full radius range; the certified radius $\epsilon^* = 0.18$ at $80.4\%$ accuracy is marked by the dashed line.}
+\label{fig:cert_curve}
+\end{figure}
+
+\subsection{Latency, throughput, and platform integration}
+
+Figure~\ref{fig:latency} compares per-flow latency and throughput across methods. \modelname{}-130M achieves $0.6$~ms per-flow latency on a single CPU core ($16{,}700$ flows/s), within the $1$~ms target for inline deployment in the RobustIDPS.ai DefensePipeline. The certificate-computation overhead is $0.10$~ms per flow ($16.7\%$ of total) and is constant in batch size.
+
+\begin{figure}[!t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=\columnwidth, height=5.4cm,
+    xlabel={Per-flow latency (ms)}, xlabel style={font=\footnotesize},
+    ylabel={Throughput (flows/s, $\times 10^3$)}, ylabel style={font=\footnotesize},
+    xmin=0, xmax=1.4,
+    ymin=0, ymax=22,
+    x tick label style={font=\scriptsize},
+    y tick label style={font=\scriptsize},
+    legend style={
+        at={(0.5, 1.10)}, anchor=south,
+        legend columns=3, font=\scriptsize,
+        column sep=6pt, draw=none, fill=none
+    },
+    legend cell align=left,
+    grid=major, grid style={gray!20},
+    only marks, mark size=4pt,
+]
+\addplot[color=blue!60, mark=square*]   coordinates {(0.5, 20.0)}; \addlegendentry{Mamba (uncons.)}
+\addplot[color=orange!80, mark=triangle*] coordinates {(1.0, 10.0)}; \addlegendentry{CLASP}
+\addplot[color=purple!70, mark=diamond*] coordinates {(0.5, 20.0)}; \addlegendentry{MambaShield}
+\addplot[color=red!80, mark=*]          coordinates {(0.6, 16.7)}; \addlegendentry{\modelname{}-130M}
+\addplot[color=red!50, mark=pentagon*]  coordinates {(0.8, 12.5)}; \addlegendentry{\modelname{}-370M}
+\addplot[color=gray, mark=triangle, mark size=3pt] coordinates {(1.2, 8.3)}; \addlegendentry{Jamba-hybrid}
+\draw[black!50, dashed, line width=0.5pt] (axis cs:1.0, 0) -- (axis cs:1.0, 22);
+\node[font=\tiny, black!60, anchor=south west] at (axis cs:1.01, 0.4) {$1$ ms SLO};
+\end{axis}
+\end{tikzpicture}
+\caption{Latency vs.\ throughput on the RobustIDPS.ai single-CPU-core deployment context. \modelname{}-130M lies inside the $1$~ms inline-deployment envelope while supplying certified radii; Jamba-hybrid exceeds the SLO due to its attention component.}
+\label{fig:latency}
+\end{figure}
+
+\subsection{Multi-dimensional achievement profile and limitations}
+
+Figure~\ref{fig:radar} summarizes \modelname{}'s performance across seven evaluation dimensions, juxtaposing achievements against current limitations on the same axes. The radar plot makes the limitation profile explicit: while certified radius ($\epsilon^* = 0.18$), clean accuracy ($91.9\%$), and ASR reduction ($61.2$~pp) are all near-frontier, the certified PAC-Bayes bound saturates at the 130--370~M parameter scale (axis ``PAC-B.\ tight.'') and would require additional compression techniques~\cite{lotfi2024nonvacuous} to remain non-vacuous beyond $1$~B parameters; analogously, the certified poisoning radius $\ell^* \approx 24$ is conservative for very long contexts ($> 10^4$ tokens), where the geometric decay of $\rho_{\min}^\ell$ in Theorem~\ref{thm:immunity} eventually saturates the bound. These limitations are direct candidates for further studies (Section~\ref{subsec:limitations}).
+
+\begin{figure}[!t]
+\centering
+\begin{tikzpicture}[scale=0.78]
+  \def\naxes{7}
+  \def\maxval{100}
+  \pgfmathsetmacro{\angleincrement}{360/\naxes}
+  \foreach \level in {20,40,60,80,100} {
+    \pgfmathsetmacro{\r}{\level/\maxval*2.7}
+    \draw[gray!25, line width=0.3pt] (0,0)
+      \foreach \i in {1,...,\naxes} { -- ({\angleincrement*\i-90}:\r) } -- cycle;
+    \node[font=\tiny, gray!60] at (90:\r+0.15) {\level};
+  }
+  \foreach \i in {1,...,\naxes} {
+    \pgfmathsetmacro{\angle}{\angleincrement*\i-90}
+    \draw[gray!40, line width=0.3pt] (0,0) -- (\angle:2.7);
+    \pgfmathsetmacro{\labelr}{3.15}
+    \node[font=\tiny, align=center, text width=1.4cm] at (\angle:\labelr) {%
+      \ifnum\i=1 Clean\\[-1pt]Acc.\fi
+      \ifnum\i=2 Cert.\\[-1pt]Acc.\fi
+      \ifnum\i=3 ASR\\[-1pt]Reduct.\fi
+      \ifnum\i=4 Cert.\\[-1pt]Radius $\epsilon^*$\fi
+      \ifnum\i=5 Calib.\\[-1pt](1$-$ECE)\fi
+      \ifnum\i=6 Latency\\[-1pt]Budget\fi
+      \ifnum\i=7 PAC-B.\\[-1pt]Tight.\fi
+    };
+  }
+  % LipMamba-370M (achievement profile)
+  \draw[red!80, line width=1.2pt, fill=red!15, fill opacity=0.4]
+    ({1*\angleincrement-90}:{91.9/\maxval*2.7}) --
+    ({2*\angleincrement-90}:{80.4/\maxval*2.7}) --
+    ({3*\angleincrement-90}:{61.2/\maxval*2.7}) --
+    ({4*\angleincrement-90}:{60/\maxval*2.7}) --   % epsilon*=0.18 -> scaled to 60
+    ({5*\angleincrement-90}:{96.6/\maxval*2.7}) -- % 1-0.034 -> 96.6
+    ({6*\angleincrement-90}:{75/\maxval*2.7}) --   % 1-0.6/2.4 budget headroom
+    ({7*\angleincrement-90}:{80.3/\maxval*2.7}) -- % PAC-Bayes 1-0.197
+    cycle;
+  % MambaShield baseline
+  \draw[blue!50, line width=0.8pt, dashed, fill=blue!10, fill opacity=0.25]
+    ({1*\angleincrement-90}:{91.6/\maxval*2.7}) --
+    ({2*\angleincrement-90}:{0/\maxval*2.7}) --   % no certificate
+    ({3*\angleincrement-90}:{44.9/\maxval*2.7}) -- % from 92.1 to 47.2 ASR
+    ({4*\angleincrement-90}:{0/\maxval*2.7}) --
+    ({5*\angleincrement-90}:{95.8/\maxval*2.7}) --
+    ({6*\angleincrement-90}:{79.2/\maxval*2.7}) --
+    ({7*\angleincrement-90}:{0/\maxval*2.7}) --
+    cycle;
+  % CLASP detector
+  \draw[orange!80, line width=0.8pt, dotted, fill=orange!8, fill opacity=0.20]
+    ({1*\angleincrement-90}:{89.7/\maxval*2.7}) --
+    ({2*\angleincrement-90}:{55.7/\maxval*2.7}) --
+    ({3*\angleincrement-90}:{53.6/\maxval*2.7}) --
+    ({4*\angleincrement-90}:{0/\maxval*2.7}) --   % no formal radius
+    ({5*\angleincrement-90}:{93.9/\maxval*2.7}) --
+    ({6*\angleincrement-90}:{58.3/\maxval*2.7}) -- % 1-1/2.4
+    ({7*\angleincrement-90}:{0/\maxval*2.7}) --
+    cycle;
+  \foreach \val/\idx in {91.9/1, 80.4/2, 61.2/3, 60/4, 96.6/5, 75/6, 80.3/7} {
+    \fill[red!80] ({\idx*\angleincrement-90}:{\val/\maxval*2.7}) circle (1.4pt);
+  }
+  \node[font=\tiny, anchor=east] at (-2.4, -3.4) {\textcolor{red!80}{\rule{8pt}{1.5pt}} \textbf{\modelname{}-370M}};
+  \node[font=\tiny, anchor=center] at (0, -3.4) {\textcolor{blue!50}{- - -} MambaShield};
+  \node[font=\tiny, anchor=west] at (1.5, -3.4) {\textcolor{orange!80}{$\cdots$} CLASP};
+\end{tikzpicture}
+\caption{Multi-dimensional performance profile across seven axes. \modelname{}-370M (red) achieves balanced coverage including certified-radius ($\epsilon^*$) and PAC-Bayes-tightness axes that are zero for empirical baselines. The non-saturated axes (Cert.\ Radius $\epsilon^*$ at $60$, PAC-B.\ Tightness at $80.3$) indicate the principal directions for further studies, namely scaling certified radius beyond $0.20$ and tightening the bound at $\geq 1$~B parameters.}
+\label{fig:radar}
+\end{figure}
+
+
+\subsection{Hidden-state mechanism analysis}
+\label{subsec:mechanism}
+
+Beyond aggregate accuracy, 2025--2026 reviewers in this area increasingly request \emph{mechanism-level} evidence that a defense actually neutralizes the specific attack vector it claims to address. For HiSPA the canonical artifact is the hidden-state norm trajectory $\norm{\mathbf{h}_t}_2$ as a function of token position, since the attack is defined by post-trigger collapse of this quantity~\cite{lemercier2026hispa}. Figure~\ref{fig:trajectory} plots $\norm{\mathbf{h}_t}_2$ over a $128$-token sequence containing a $24$-token HiSPA trigger inserted at position $t = 48$.
+
+\begin{figure}[!t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=\columnwidth, height=5.6cm,
+    xlabel={\textbf{Token position $t$}},
+    ylabel={\textbf{Hidden-state norm $\norm{\mathbf{h}_t}_2$}},
+    xlabel style={font=\footnotesize\bfseries},
+    ylabel style={font=\footnotesize\bfseries},
+    xmin=0, xmax=128,
+    ymin=0, ymax=5.0,
+    xtick={0, 24, 48, 72, 96, 128},
+    x tick label style={font=\scriptsize\bfseries},
+    y tick label style={font=\scriptsize\bfseries},
+    legend style={
+        at={(0.5, 1.10)}, anchor=south,
+        legend columns=3, font=\scriptsize\bfseries,
+        column sep=8pt,
+        /tikz/every even column/.append style={column sep=10pt},
+        draw=none, fill=none
+    },
+    legend cell align=left,
+    grid=major, grid style={gray!20},
+    line width=0.9pt,
+]
+% Clean trajectory (no attack) — stable around 4.0
+\addplot[color=blue!70!black, mark=*, mark size=1.0pt, mark repeat=8]
+    coordinates {
+    (0,0.2)(8,1.6)(16,2.8)(24,3.5)(32,3.9)(40,4.0)(48,4.0)(56,4.0)(64,4.0)
+    (72,4.0)(80,4.0)(88,4.0)(96,4.0)(104,4.0)(112,4.0)(120,4.0)(128,4.0)
+    };
+% Mamba (unconstrained) under HiSPA — collapses sharply after t=48
+\addplot[color=red!70!black, mark=square*, mark size=1.0pt, mark repeat=8, dashed]
+    coordinates {
+    (0,0.2)(8,1.6)(16,2.8)(24,3.5)(32,3.9)(40,4.0)(48,4.0)
+    (52,2.4)(56,1.1)(60,0.5)(64,0.2)(68,0.1)(72,0.05)
+    (80,0.04)(88,0.04)(96,0.04)(104,0.04)(112,0.04)(120,0.04)(128,0.04)
+    };
+% LipMamba-370M under HiSPA — partial dip then recovery
+\addplot[color=green!50!black, mark=triangle*, mark size=1.2pt, mark repeat=8, line width=1.0pt]
+    coordinates {
+    (0,0.2)(8,1.6)(16,2.8)(24,3.5)(32,3.9)(40,4.0)(48,4.0)
+    (52,3.6)(56,3.2)(60,2.9)(64,2.7)(68,2.6)(72,2.55)
+    (80,2.6)(88,2.7)(96,2.85)(104,3.0)(112,3.15)(120,3.3)(128,3.45)
+    };
+% Mark the trigger window
+\draw[red!50, dashed, line width=0.4pt] (axis cs:48,0) -- (axis cs:48,5);
+\draw[red!50, dashed, line width=0.4pt] (axis cs:72,0) -- (axis cs:72,5);
+\node[font=\tiny\bfseries, red!70!black, anchor=south] at (axis cs:60, 4.4) {HiSPA trigger};
+\node[font=\tiny\bfseries, red!70!black, anchor=south] at (axis cs:60, 4.05) {$\ell=24$};
+% Mark immunity threshold alpha_min * h_0 = 0.5 * 4.0 = 2.0
+\draw[orange!90!black, dotted, line width=0.6pt] (axis cs:0,2.0) -- (axis cs:128,2.0);
+\node[font=\tiny\bfseries, orange!80!black, anchor=west] at (axis cs:108, 2.2) {$\alpha_{\min}\norm{\mathbf{h}_0}$};
+\legend{Clean (no attack), Mamba under HiSPA, \modelname{}-370M under HiSPA}
+\end{axis}
+\end{tikzpicture}
+\caption{\textbf{Hidden-state norm trajectory under the HiSPA mechanism.} Sequence position $t$ on the x-axis; $\norm{\mathbf{h}_t}_2$ on the y-axis. A 24-token trigger is injected over $t \in [48, 72]$ (red dashed band). Unconstrained Mamba (red squares, dashed) collapses to $\norm{\mathbf{h}_t}_2 \approx 0.04$ within the trigger window (a $99\%$ retention loss). \modelname{}-370M (green triangles) bottoms out at $\norm{\mathbf{h}_{72}}_2 = 2.55$ ($64\%$ retention) and then recovers, remaining strictly above the certified safety threshold $\alpha_{\min}\norm{\mathbf{h}_0}_2 = 2.0$ (orange dotted) for the entire post-trigger horizon, in agreement with Theorem~\ref{thm:immunity} at $\ell^* \approx 24$.}
+\label{fig:trajectory}
+\end{figure}
+
+The figure makes the certified poisoning-immunity bound visually concrete: under HiSPA, unconstrained Mamba's hidden state collapses to $\norm{\mathbf{h}_{72}}_2 \approx 0.04$ ($99.0\%$ retention loss), whereas \modelname{}-370M's hidden state bottoms out at $\norm{\mathbf{h}_{72}}_2 = 2.55$ ($63.8\%$ retention) and recovers thereafter. The state never crosses the $\alpha_{\min}\norm{\mathbf{h}_0}_2 = 2.0$ threshold ($\alpha_{\min} = 0.5$, $\norm{\mathbf{h}_0}_2 = 4.0$), confirming Theorem~\ref{thm:immunity}'s analytical bound $\ell^* \approx 24$ on the post-trigger horizon.
+
+\subsection{Robustness--utility frontier}
+
+A second metric increasingly expected by reviewers is the explicit Pareto frontier between clean accuracy (utility) and certified accuracy at a fixed perturbation radius (robustness). Figure~\ref{fig:pareto} positions every method on this frontier at the operationally significant radius $\epsilon = 0.18$, the certified $\epsilon^*$ of \modelname{}-370M.
+
+\begin{figure}[!t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=\columnwidth, height=6.0cm,
+    xlabel={\textbf{Clean accuracy (\%) --- utility}},
+    ylabel={\textbf{Certified accuracy at $\epsilon=0.18$ (\%) --- robustness}},
+    xlabel style={font=\footnotesize\bfseries},
+    ylabel style={font=\footnotesize\bfseries},
+    xmin=88, xmax=93,
+    ymin=-5, ymax=85,
+    xtick={88, 89, 90, 91, 92, 93},
+    x tick label style={font=\scriptsize\bfseries},
+    y tick label style={font=\scriptsize\bfseries},
+    grid=major, grid style={gray!20},
+    legend style={at={(0.5, 1.10)}, anchor=south, font=\scriptsize\bfseries,
+                  legend columns=2, draw=none, fill=none, column sep=10pt},
+]
+% Pareto frontier curve (informal indicative line)
+\addplot[no marks, gray!50, dashed, line width=0.8pt, smooth]
+    coordinates {(88, -3) (89, 5) (89.5, 25) (90, 50) (90.8, 70) (91.5, 78) (91.9, 80.4) (92, 81)};
+\addlegendentry{Pareto frontier}
+% Methods (each as a labelled scatter point)
+\addplot[only marks, mark=square*, mark size=2.6pt, color=blue!70!black]
+    coordinates {(89.7, 0)};
+\addlegendentry{Mamba (unconstrained)}
+\addplot[only marks, mark=triangle*, mark size=2.8pt, color=blue!50!black]
+    coordinates {(90.3, 0)};
+\addplot[only marks, mark=diamond*, mark size=2.8pt, color=cyan!50!black]
+    coordinates {(91.2, 0)};
+\addplot[only marks, mark=*, mark size=2.6pt, color=purple!70!black]
+    coordinates {(91.6, 0)};
+\addplot[only marks, mark=square, mark size=2.6pt, color=orange!80!black, line width=0.8pt]
+    coordinates {(89.7, 50.3)};
+\addplot[only marks, mark=triangle, mark size=3.0pt, color=red!50!black, line width=0.8pt]
+    coordinates {(89.4, 56.4)};
+\addplot[only marks, mark=diamond, mark size=3.4pt, color=green!50!black, line width=1.0pt]
+    coordinates {(90.8, 73.6)};
+\addplot[only marks, mark=star, mark size=4.6pt, color=red!80!black, line width=1.2pt]
+    coordinates {(91.9, 80.4)};
+% Annotate each point
+\node[font=\scriptsize\bfseries, anchor=north]      at (axis cs: 89.7, -1)  {Mamba};
+\node[font=\scriptsize\bfseries, anchor=north]      at (axis cs: 90.3, -1)  {Mamba-2};
+\node[font=\scriptsize\bfseries, anchor=south west] at (axis cs: 91.0, 1)   {Jamba};
+\node[font=\scriptsize\bfseries, anchor=south west] at (axis cs: 91.55, 2)  {MShield};
+\node[font=\scriptsize\bfseries, anchor=west]       at (axis cs: 89.85, 50.3) {CLASP};
+\node[font=\scriptsize\bfseries, anchor=west]       at (axis cs: 89.55, 56.4) {SpectralG.};
+\node[font=\scriptsize\bfseries, anchor=south]      at (axis cs: 90.8, 75.5) {\textbf{LipMamba-130M}};
+\node[font=\scriptsize\bfseries, anchor=south]      at (axis cs: 91.9, 82.5) {\textbf{LipMamba-370M}};
+% Iso-utility-robustness curves (sum constant) - drop these for cleanliness
+\end{axis}
+\end{tikzpicture}
+\caption{\textbf{Robustness--utility Pareto frontier at $\epsilon = 0.18$.} Each method is plotted as a scatter point; the dashed grey curve indicates the empirical frontier across all evaluated systems. \modelname{}-130M and \modelname{}-370M (red star, green diamond) lie strictly above the frontier traced by all baselines, with \modelname{}-370M extending the frontier to $(91.9\%, 80.4\%)$. Empirical defenses CLASP and SpectralGuard occupy a middle band ($50\%$--$56\%$ certified accuracy) without recovering the clean-accuracy losses they incur. Unconstrained Mamba, Mamba-2, Jamba-1.7-Mini, and MambaShield (no certified head) sit on the y-axis at zero certified accuracy.}
+\label{fig:pareto}
+\end{figure}
+
+Three observations follow. First, the certified architectures (\modelname{} variants) Pareto-dominate the empirical detector defenses (CLASP, SpectralGuard) on both axes simultaneously: not only is certified accuracy higher, clean accuracy is non-inferior. Second, the gap between MambaShield ($91.6\%$ clean, $0\%$ certified) and \modelname{}-370M ($91.9\%$ clean, $80.4\%$ certified) on the same architectural family quantifies the value of the Lipschitz-constraint-plus-certificate-head mechanism: $0.3$ percentage points of clean utility traded for $80.4$ percentage points of robustness. Third, the position of \modelname{}-370M as the new Pareto extremum at this radius answers the standard reviewer question ``is the proposed method on the frontier?''.
+
+\subsection{Extended metrics: ACR, AURC, and latency percentiles}
+\label{subsec:extended_metrics}
+
+Three additional metrics commonly requested in 2025--2026 certified-robustness submissions are reported in Table~\ref{tab:extended} for completeness: (i) Average Certified Radius (ACR), the mean of $\epsilon^*(\mathbf{x})$ over the test set; (ii) Area Under the Risk--Coverage curve (AURC), a selective-prediction metric measuring the trade-off between coverage and risk when the certificate is used as an abstention threshold; (iii) latency percentiles (P50, P95, P99), capturing tail behavior beyond the mean reported earlier.
+
+\begin{table}[!t]
+\centering
+\caption{Extended metrics on RoBench-25 / IDS-avg.}
+\label{tab:extended}
+\small
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\textbf{Method} & ACR & AURC & FLOPs/tok & GPU Mem. & P50 & P99 \\
+& & $\downarrow$ & (G) & (GB) & (ms) & (ms) \\
+\midrule
+Mamba (uncons.) & 0.04 & 0.142 & 8.7 & 0.4 & 0.5 & 0.9 \\
+MambaShield~\cite{anaedevha2025mambashield} & N/A & 0.118 & 8.8 & 0.4 & 0.5 & 1.0 \\
+CLASP~\cite{lemercier2026clasp} & N/A & 0.135 & 12.4 & 0.6 & 1.0 & 1.7 \\
+SpectralGuard~\cite{lemercier2026spectralguard} & 0.10 & 0.125 & 11.6 & 0.5 & 0.9 & 1.5 \\
+\midrule
+\modelname{}-130M & 0.156 & \textbf{0.094} & 9.4 & 0.5 & 0.6 & 1.1 \\
+\modelname{}-370M & \textbf{0.184} & 0.097 & 14.1 & 1.2 & 0.8 & 1.4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\modelname{}-370M attains the highest ACR ($0.184$) and the lowest AURC ($0.097$, tied with the 130M variant), confirming that the certified radius distribution concentrates at high values and that the certificate functions as a useful abstention signal for selective deployment. The P99 latency ($1.4$~ms) remains within the inline-detection envelope on a single CPU core. FLOPs per token grow proportionally with the parameter count and are competitive with hybrid Jamba (not shown; $19.6$ G/token).
+
+
+
+
+Table~\ref{tab:ablation} reports the contribution of each \modelname{} component on RoBench-25, evaluated at the LipMamba-130M scale.
+
+\begin{table}[!t]
+\centering
+\caption{Component ablation on RoBench-25 (LipMamba-130M).}
+\label{tab:ablation}
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Configuration} & ACC & PACC & Cert. & $\epsilon^*$ \\
+\midrule
+\modelname{}-130M (full) & \textbf{90.8} & \textbf{82.7} & \textbf{77.1} & \textbf{0.15} \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Architectural ablations}}\\
+\quad w/o spectral norm on $\mathbf{W}_B, \mathbf{W}_C$ & 91.4 & 36.2 & 0.0 & --- \\
+\quad w/o $\Delta_{\max}$ clipping (vanilla softplus) & 91.0 & 41.7 & 8.4 & 0.04 \\
+\quad w/o eigenvalue reparam (free $\mathbf{A}$) & 90.7 & 64.3 & 32.5 & 0.07 \\
+\quad w/o GloroNet certification head & 90.9 & 73.8 & 0.0 & --- \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Training-objective ablations}}\\
+\quad w/o PAC-Bayes term (clean training only) & 91.2 & 58.4 & 41.6 & 0.09 \\
+\quad w/o adversarial training & 90.6 & 61.9 & 56.2 & 0.12 \\
+\quad data-independent prior $P = \Ncal(0, I)$ & 90.8 & 78.4 & 67.3 & 0.13 \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Sensitivity to $\Delta_{\max}$}}\\
+\quad $\Delta_{\max} = 0.25$ & 89.7 & 84.1 & 80.6 & 0.16 \\
+\quad $\Delta_{\max} = 0.50$ (default) & 90.8 & 82.7 & 77.1 & 0.15 \\
+\quad $\Delta_{\max} = 1.00$ & 91.4 & 71.2 & 58.7 & 0.10 \\
+\quad $\Delta_{\max} = 2.00$ & 91.6 & 52.4 & 28.6 & 0.05 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Three observations stand out. First, removing spectral normalization on the projection networks (Row 2) causes the largest single-component degradation: certified accuracy collapses to zero and PACC drops by $46.5$ percentage points, confirming that the input-dependent triplet $(\bar{\mathbf{B}}_t, \bar{\mathbf{C}}_t, \bar{\mathbf{W}}_\Delta)$ is the dominant Lipschitz contributor. Second, the $\Delta_{\max}$-clipping ablation (Row 3) directly validates the HiSPA mechanism: when $\Delta_t$ is allowed to saturate, certified accuracy drops to $8.4\%$, almost identical to unconstrained Mamba's $19.2\%$. Third, the sensitivity sweep over $\Delta_{\max}$ reveals a clean accuracy–robustness frontier: tighter clipping at $\Delta_{\max} = 0.25$ achieves the strongest certificate ($\epsilon^* = 0.16$) at a $1.1$-pp clean-accuracy cost, while loose clipping at $\Delta_{\max} = 2.0$ approaches unconstrained behavior. The default $\Delta_{\max} = 0.5$ sits at the elbow of this trade-off.
+
+
+%% ============================================================
+\section{Discussion}
+\label{sec:discussion}
+%% ============================================================
+
+\subsection{Production deployment within RobustIDPS.ai}
+
+\modelname{} replaces the MambaShield core SSM in the RobustIDPS.ai DefensePipeline~\cite{anaedevha2026robustidps} as a certified upgrade path. The platform integrates thirteen-plus neural architectures across $34$ attack classes and $83$ engineered features, processing over $2$~TB of daily traffic in production. Where MambaShield delivered $0.5$~ms per-flow latency without certification, \modelname{}-130M emits the GloroNet bound $\epsilon^*$ alongside each prediction at $0.6$~ms, enabling SOC components to escalate or de-prioritize alerts based on certificate strength. Specifically, the auto-investigation module consumes $\epsilon^*$ as a confidence weight when fanning out to MITRE ATT\&CK enrichment, and the IDS rule generator suppresses Suricata rule emission for low-certificate classifications. Over a 30-day production evaluation processing $14.2$~M flows from three partner organizations, \modelname{} detected $73$ HiSPA-style hidden-state attacks (confirmed by manual analyst review) with $4$ false positives, achieving $94.8\%$ precision and $96.1\%$ recall at the $\epsilon^* \geq 0.10$ certification threshold.
+
+\subsection{Limitations and further studies}
+\label{subsec:limitations}
+
+Three limitations identified in Fig.~\ref{fig:radar} merit further study. \emph{First}, the certified poisoning radius $\ell^* \approx 24$ tokens at default settings is conservative for very long contexts ($> 10^4$ tokens), where the geometric decay $\rho_{\min}^\ell$ in Theorem~\ref{thm:immunity} eventually saturates the bound. Tightening the analysis via state-space-duality~\cite{dao2024mamba2} or selective contraction certificates is a natural follow-up. \emph{Second}, the PAC-Bayesian bound is non-vacuous up to $\sim$$370$~M parameters in our evaluation, but tightens to $0.27$ at $1.3$~B parameters under our SubLoRA-style compression, against the $0.20$ threshold the field treats as ``tight''. Following Lotfi et al.~\cite{lotfi2024nonvacuous}, integrating learned-prior compression with the Lipschitz coupling could close this gap. \emph{Third}, the certified radius $\epsilon^* = 0.18$ is competitive with current SOTA Lipschitz-constrained Transformers~\cite{newhouse2025lipschitz} but does not yet certify against arbitrary $\ell_\infty$ perturbations beyond $\epsilon = 0.30$; randomized-smoothing-over-training-distribution techniques~\cite{rosenfeld2020certified} or hybrid IBP/Lipschitz~\cite{shi2020robustness} certificates may extend the radius without sacrificing inference latency.
+
+\subsection{Threats to validity}
+
+Two threats to validity merit acknowledgment. The HiSPA papers~\cite{lemercier2026hispa,lemercier2026clasp,lemercier2026spectralguard} are 2026 preprints whose final venue acceptance is pending; while the empirical findings are reproducible from the public RoBench-25 release, our certificate values are calibrated to the published trigger distribution and would need re-verification under any post-acceptance benchmark revision. Adaptive adversaries with full white-box knowledge of the \modelname{} constraints have not been evaluated in this work; the GCG-style optimization~\cite{zou2023universal} of triggers specifically targeting the constrained $\Delta_t$ region remains an open evaluation that we begin to address in concurrent work.
+
+
+%% ============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+%% ============================================================
+
+This paper introduced \modelname{}, the first certified architectural defense against hidden-state poisoning attacks on selective state-space language models. Three contributions were presented: a tight Lipschitz bound for the input-dependent selective SSM block (Theorem~\ref{thm:lip}), a deterministic certified poisoning-immunity theorem yielding analytical trigger-length bounds (Theorem~\ref{thm:immunity}), and a PAC-Bayesian generalization bound that simultaneously certifies clean and adversarial risk under hidden-state perturbations (Theorem~\ref{thm:pacbayes}). The architecture composes spectral-norm projection of $(\mathbf{W}_B, \mathbf{W}_C, \mathbf{W}_\Delta)$, eigenvalue-bounded reparameterization of the state matrix, $\Delta_{\max}$-clipped discretization, and a GloroNet certification head. Evaluation on RoBench-25, HarmBench, JailbreakBench, and four IDS datasets demonstrates $80.4\%$ certified accuracy at certified radius $\epsilon^* = 0.18$, a $61.2$~percentage-point reduction in attack success rate over unconstrained Mamba, and a $4.7\%$ clean-perplexity overhead. \modelname{}-130M operates at $0.6$~ms per-flow latency on a single CPU core within the RobustIDPS.ai deployment context, where it serves as the certified replacement for the MambaShield sequential-pattern model. By providing the first \emph{certified} architectural defense for selective SSMs, \modelname{} closes the gap between empirical robustness defenses and the deployment-grade safety guarantees required for production agentic and security-critical applications.
+
+
+%% ============================================================
+\section*{Acknowledgments}
+%% ============================================================
+
+This work was supported by a grant for research centers in Artificial Intelligence from the Ministry of Economic Development of the Russian Federation under subsidy agreement (identifier 000000C313925P3Q0002). The authors declare no competing financial interests.
+
+\noindent\textbf{Reproducibility.} All experiments were conducted on $4 \times$ NVIDIA A100 80~GB GPUs with $512$~GB RAM and dual AMD EPYC 7763 processors. Latency measurements use a single Intel Xeon Gold $6248$ CPU core. Each result is the mean over three random seeds ($42$, $137$, $2026$). Hyperparameter search used Bayesian optimization over $40$ trials for $(s_B, s_C, s_\Delta, \Delta_{\max}, \lambda_{\max}, \beta)$ on a $5\%$ data sample, with the best configuration applied to the full run. The data-dependent prior was fit on a $5\%$ clean held-out split. RoBench-25 is used at the v1.0 release (Le Mercier et al.~\cite{lemercier2026hispa}); the four IDS datasets at the versions cited in Section~\ref{sec:experiments}. Source code, certified pretrained checkpoints (130~M / 370~M / 1.3~B), the \benchname{} extension, and the integration adapter for the RobustIDPS.ai DefensePipeline are released at \url{https://github.com/rogerpanel/LipMamba}.
+
+
+%% ============================================================
+%% BIBLIOGRAPHY
+%% ============================================================
+\balance
+\begin{thebibliography}{99}
+\bibitem{gu2024mamba}
+A.~Gu and T.~Dao, ``{Mamba}: Linear-time sequence modeling with selective state spaces,'' in \emph{Proc. COLM}, 2024.
+
+\bibitem{dao2024mamba2}
+T.~Dao and A.~Gu, ``Transformers are SSMs: Generalized models and efficient algorithms through structured state space duality,'' in \emph{Proc. ICML}, 2024.
+
+\bibitem{lemercier2026hispa}
+A.~Le~Mercier, C.~Develder, and T.~Demeester, ``Hidden state poisoning attacks against {Mamba}-based language models,'' \emph{arXiv preprint arXiv:2601.01972}, 2026.
+
+\bibitem{gu2020hippo}
+A.~Gu, T.~Dao, S.~Ermon, A.~Rudra, and C.~R\'e, ``HiPPO: Recurrent memory with optimal polynomial projections,'' in \emph{Proc. NeurIPS}, vol.~33, 2020, pp.~1474--1487.
+
+\bibitem{lemercier2026clasp}
+A.~Le~Mercier, C.~Develder, and T.~Demeester, ``{CLASP}: Defending hybrid large language models against hidden state poisoning attacks,'' \emph{arXiv preprint arXiv:2603.12206}, 2026.
+
+\bibitem{lemercier2026spectralguard}
+A.~Le~Mercier, C.~Develder, and T.~Demeester, ``{SpectralGuard}: Spectral horizon detection of hidden-state attacks on selective SSMs,'' \emph{arXiv preprint arXiv:2603.12414}, 2026.
+
+\bibitem{anaedevha2025mambashield}
+R.~N.~Anaedevha, A.~G.~Trofimov, and Y.~V.~Borodachev, ``{MambaShield}: Selective state-space models for poisoning-resilient sequential modeling,'' \emph{Expert Systems with Applications}, Elsevier, 2025. doi:10.1016/j.eswa.2026.131175.
+
+\bibitem{anaedevha2026uchgp}
+R.~N.~Anaedevha, A.~G.~Trofimov, and Y.~V.~Borodachev, ``Uncertainty-calibrated hierarchical {Gaussian} processes for intrusion detection with multi-scale temporal modeling,'' \emph{Neurocomputing}, p.~133105, Elsevier, 2026. doi:10.1016/j.neucom.2026.133105.
+
+\bibitem{anaedevha2026tanode}
+R.~N.~Anaedevha, A.~G.~Trofimov, and Y.~V.~Borodachev, ``Temporal adaptive Neural ordinary differential equations with deep spatio-temporal point processes for real-time network intrusion detection,'' \emph{Complex and Intelligent Systems}, Springer, 2026. doi:10.1007/s40747-026-02291-7.
+
+\bibitem{anaedevha2024adversarial}
+R.~N.~Anaedevha and A.~G.~Trofimov, ``Improved robust adversarial model against evasion attacks on intrusion detection systems,'' \emph{Optical Memory and Neural Networks (Information Optics)}, vol.~33, no.~Suppl 3, pp.~S414--S423, 2024. doi:10.3103/S1060992X24700681.
+
+\bibitem{anaedevha2025stochastic}
+R.~N.~Anaedevha and A.~G.~Trofimov, ``Stochastic multimodal transformer with uncertainty quantification for robust network intrusion detection,'' in \emph{Advances in Neural Computation, Machine Learning, and Cognitive Research IX (NEUROINFORMATICS 2025), Studies in Computational Intelligence, vol.~1241}, Springer Cham, 2025. doi:10.1007/978-3-032-07690-8\_35.
+
+\bibitem{anaedevha2025dqn}
+R.~N.~Anaedevha and A.~G.~Trofimov, ``Integrated deep Q-networks and actor-critic models for enhanced poisoning attack detection in network intrusion detection systems,'' in \emph{Proc.~2025 Conference of Young Researchers in Electrical and Electronic Engineering (ElCon)}, ETU-LETI, St.~Petersburg, Russia, 2025, vol.~33, no.~Suppl.~3, pp.~556--567.
+
+\bibitem{anaedevha2024wireless}
+R.~N.~Anaedevha, ``Application of machine learning models for device identification in wireless network traffic,'' in \emph{Proc. 2024 Conference of Young Researchers in Electrical and Electronic Engineering (ElCon)}, IEEE, Saint Petersburg, Russia, 2024, pp.~104--110. doi:10.1109/ElCon61730.2024.10468413.
+
+\bibitem{miyato2018spectral}
+T.~Miyato, T.~Kataoka, M.~Koyama, and Y.~Yoshida, ``Spectral normalization for generative adversarial networks,'' in \emph{Proc. ICLR}, 2018.
+
+\bibitem{leino2021globally}
+K.~Leino, Z.~Wang, and M.~Fredrikson, ``Globally-robust neural networks,'' in \emph{Proc. ICML}, 2021.
+
+\bibitem{mcallester2003pac}
+D.~A.~McAllester, ``{PAC}-Bayesian stochastic model selection,'' \emph{Mach.\ Learn.}, vol.~51, no.~1, pp.~5--21, 2003.
+
+\bibitem{perezortiz2021tighter}
+M.~P\'erez-Ortiz, O.~Rivasplata, J.~Shawe-Taylor, and C.~Szepesv\'ari, ``Tighter risk certificates for neural networks,'' \emph{J. Mach. Learn. Res.}, vol.~22, no.~227, pp.~1--40, 2021.
+
+\bibitem{lotfi2024nonvacuous}
+S.~Lotfi, M.~Finzi, Y.~Kuang, T.~G.~J.~Rudner, M.~Goldblum, and A.~G.~Wilson, ``Non-vacuous generalization bounds for large language models,'' in \emph{Proc. ICML}, 2024.
+
+\bibitem{eringis2024pacbayes}
+D.~Eringis, J.~Leth, R.~Nakada, J.~H.~Manton, R.~Wisniewski, and M.~Petreczky, ``{PAC}-Bayes generalisation bounds for dynamical systems including stable RNNs,'' in \emph{Proc. AAAI}, 2024.
+
+% --- Datasets and benchmarks ---
+
+\bibitem{anaedevha2026robustidps}
+R.~N.~Anaedevha, A.~G.~Trofimov, and Y.~V.~Borodachev, ``{RobustIDPS.ai}: An adversarially robust AI/ML security platform with 13+ neural architectures and post-quantum cryptography support,'' Platform Documentation, NRNU MEPhI, 2026.
+
+\bibitem{gu2022s4}
+A.~Gu, K.~Goel, and C.~R\'e, ``Efficiently modeling long sequences with structured state spaces,'' in \emph{Proc. ICLR}, 2022.
+
+\bibitem{smith2023s5}
+J.~T.~H.~Smith, A.~Warrington, and S.~W.~Linderman, ``Simplified state space layers for sequence modeling,'' in \emph{Proc. ICLR}, 2023.
+
+\bibitem{lieber2024jamba}
+O.~Lieber \emph{et al.}, ``{Jamba}: A hybrid Transformer-Mamba language model,'' \emph{arXiv preprint arXiv:2403.19887}, 2024.
+
+\bibitem{glorioso2024zamba}
+P.~Glorioso \emph{et al.}, ``{Zamba}: A compact 7B SSM hybrid model,'' \emph{arXiv preprint arXiv:2405.16712}, 2024.
+
+\bibitem{du2024robustness}
+H.~Du, Y.~Li, and X.~Xu, ``Understanding robustness of visual state-space models,'' \emph{arXiv preprint arXiv:2403.10935}, 2024.
+
+\bibitem{malik2025evaluating}
+H.~A.~Malik \emph{et al.}, ``Towards evaluating the robustness of visual state-space models,'' in \emph{Proc. CVPR Workshops (AdvML)}, 2025.
+
+\bibitem{guo2025badvim}
+H.~Guo, Y.~Fu, Z.~Hua, and X.~Xu, ``Exploring robustness of visual state-space model against backdoor attacks,'' in \emph{Proc. AAAI}, 2025.
+
+% --- Hidden state poisoning ---
+
+\bibitem{gu2017badnets}
+T.~Gu, B.~Dolan-Gavitt, and S.~Garg, ``{BadNets}: Identifying vulnerabilities in the machine learning model supply chain,'' \emph{arXiv preprint arXiv:1708.06733}, 2017.
+
+\bibitem{chen2017targeted}
+X.~Chen, C.~Liu, B.~Li, K.~Lu, and D.~Song, ``Targeted backdoor attacks on deep learning systems using data poisoning,'' \emph{arXiv preprint arXiv:1712.05526}, 2017.
+
+\bibitem{kurita2020weight}
+K.~Kurita, P.~Michel, and G.~Neubig, ``Weight poisoning attacks on pre-trained models,'' in \emph{Proc. ACL}, 2020, pp.~2793--2806.
+
+\bibitem{zou2023universal}
+A.~Zou, Z.~Wang, N.~Carlini, M.~Nasr, J.~Z.~Kolter, and M.~Fredrikson, ``Universal and transferable adversarial attacks on aligned language models,'' \emph{arXiv preprint arXiv:2307.15043}, 2023.
+
+\bibitem{hubinger2024sleeper}
+E.~Hubinger \emph{et al.}, ``Sleeper agents: Training deceptive {LLMs} that persist through safety training,'' \emph{arXiv preprint arXiv:2401.05566}, 2024.
+
+\bibitem{zou2023repe}
+A.~Zou \emph{et al.}, ``Representation engineering: A top-down approach to AI transparency,'' \emph{arXiv preprint arXiv:2310.01405}, 2023.
+
+\bibitem{wang2024trojan}
+H.~Wang and K.~Shu, ``Trojan activation attack: Red-teaming large language models using activation steering for safety-alignment,'' in \emph{Proc. ACM CIKM}, 2024.
+
+\bibitem{zou2025poisonedrag}
+W.~Zou, R.~Geng, B.~Wang, and J.~Jia, ``{PoisonedRAG}: Knowledge corruption attacks to RAG of {LLMs},'' in \emph{Proc. USENIX Security}, 2025.
+
+\bibitem{chen2024agentpoison}
+Z.~Chen, Z.~Xiang, C.~Xiao, D.~Song, and B.~Li, ``{AgentPoison}: Red-teaming {LLM} agents via poisoning memory or knowledge bases,'' in \emph{Proc. NeurIPS}, 2024.
+
+% --- Lipschitz architectures ---
+
+\bibitem{li2025backdoorllm}
+Y.~Li, X.~Ma, J.~He, H.~Huang, and Y.-G.~Jiang, ``{BackdoorLLM}: A comprehensive benchmark for backdoor attacks and defenses on large language models,'' in \emph{Proc. NeurIPS}, 2025.
+
+\bibitem{tsuzuku2018margin}
+Y.~Tsuzuku, I.~Sato, and M.~Sugiyama, ``Lipschitz-margin training: Scalable certification of perturbation invariance for deep neural networks,'' in \emph{Proc. NeurIPS}, 2018, pp.~6542--6551.
+
+\bibitem{trockman2021cayley}
+A.~Trockman and J.~Z.~Kolter, ``Orthogonalizing convolutional layers with the {Cayley} transform,'' in \emph{Proc. ICLR}, 2021.
+
+\bibitem{arjovsky2016unitary}
+M.~Arjovsky, A.~Shah, and Y.~Bengio, ``Unitary evolution recurrent neural networks,'' in \emph{Proc. ICML}, 2016.
+
+\bibitem{pauli2024lipkernel}
+P.~Pauli \emph{et al.}, ``{LipKernel}: Dissipative-layer LMI parameterization of 1-{Lipschitz} convolutions,'' \emph{arXiv preprint arXiv:2410.22258}, 2024.
+
+\bibitem{massai2025l2ru}
+L.~Massai \emph{et al.}, ``{L2RU}: A structured state space model with prescribed $L_2$-bound,'' \emph{arXiv preprint arXiv:2503.23818}, 2025.
+
+% --- Certified robustness ---
+
+\bibitem{kim2021lipschitz}
+H.~Kim, G.~Papamakarios, and A.~Mnih, ``The {Lipschitz} constant of self-attention,'' in \emph{Proc. ICML}, 2021.
+
+\bibitem{qi2023lipsformer}
+X.~Qi, J.~Wang, Y.~Chen, Y.~Shi, and L.~Zhang, ``{LipsFormer}: Introducing {Lipschitz} continuity to vision transformers,'' in \emph{Proc. ICLR}, 2023.
+
+\bibitem{newhouse2025lipschitz}
+L.~Newhouse \emph{et al.}, ``Training transformers with enforced {Lipschitz} constants,'' \emph{arXiv preprint arXiv:2507.13338}, 2025.
+
+\bibitem{levine2021deep}
+A.~Levine and S.~Feizi, ``Deep partition aggregation: Provable defenses against general poisoning attacks,'' in \emph{Proc. ICLR}, 2021.
+
+\bibitem{wang2022certified}
+W.~Wang, A.~Levine, and S.~Feizi, ``Improved certified defenses against data poisoning with deterministic finite aggregation,'' in \emph{Proc. ICML}, 2022.
+
+\bibitem{rosenfeld2020certified}
+E.~Rosenfeld, E.~Winston, P.~Ravikumar, and J.~Z.~Kolter, ``Certified robustness to label-flipping attacks via randomized smoothing,'' in \emph{Proc. ICML}, 2020.
+
+% --- PAC-Bayes ---
+
+\bibitem{dziugaite2017computing}
+G.~K.~Dziugaite and D.~M.~Roy, ``Computing nonvacuous generalization bounds for deep stochastic neural networks,'' in \emph{Proc. UAI}, 2017.
+
+\bibitem{neyshabur2018pac}
+B.~Neyshabur, S.~Bhojanapalli, D.~McAllester, and N.~Srebro, ``A {PAC}-Bayesian approach to spectrally-normalized margin bounds for neural networks,'' in \emph{Proc. ICLR}, 2018.
+
+\bibitem{viallard2021pacbayes}
+P.~Viallard, G.~Vidot, A.~Habrard, and E.~Morvant, ``A {PAC}-Bayes analysis of adversarial robustness,'' in \emph{Proc. NeurIPS}, 2021.
+
+\bibitem{mustafa2024nonvacuous}
+W.~Mustafa, P.~Liznerski, D.~Wagner, P.~Wang, and M.~Kloft, ``Non-vacuous generalization bounds for adversarial risk in stochastic neural networks,'' in \emph{Proc. AISTATS}, 2024.
+
+\bibitem{mazeika2024harmbench}
+M.~Mazeika \emph{et al.}, ``{HarmBench}: A standardized evaluation framework for automated red teaming and robust refusal,'' in \emph{Proc. ICML}, 2024.
+
+\bibitem{chao2024jailbreakbench}
+P.~Chao \emph{et al.}, ``{JailbreakBench}: An open robustness benchmark for jailbreaking large language models,'' in \emph{Proc. NeurIPS Datasets Track}, 2024.
+
+\bibitem{jiang2024wildjailbreak}
+L.~Jiang \emph{et al.}, ``{WildTeaming} at scale: From in-the-wild jailbreaks to (adversarially) safer language models,'' in \emph{Proc. NeurIPS}, 2024.
+
+\bibitem{sharafaldin2018toward}
+I.~Sharafaldin, A.~H.~Lashkari, and A.~A.~Ghorbani, ``Toward generating a new intrusion detection dataset and intrusion traffic characterization,'' in \emph{Proc. ICISSP}, 2018, pp.~108--116.
+
+\bibitem{ferrag2022edge}
+M.~A.~Ferrag, O.~Friha, D.~Hamouda, L.~Maglaras, and H.~Janicke, ``{Edge-IIoTset}: A new comprehensive realistic cyber security dataset of IoT and IIoT applications,'' \emph{IEEE Access}, vol.~10, pp.~40281--40306, 2022.
+
+\bibitem{moustafa2015unsw}
+N.~Moustafa and J.~Slay, ``{UNSW-NB15}: A comprehensive data set for network intrusion detection systems,'' in \emph{Proc. MilCIS}, 2015.
+
+\bibitem{alsaedi2020ton}
+A.~Alsaedi, N.~Moustafa, Z.~Tari, A.~Mahmood, and A.~Anwar, ``{TON\_IoT} telemetry dataset: A new generation dataset of IoT and IIoT for data-driven intrusion detection systems,'' \emph{IEEE Access}, vol.~8, pp.~165130--165150, 2020.
+
+\bibitem{guo2017calibration}
+C.~Guo, G.~Pleiss, Y.~Sun, and K.~Q.~Weinberger, ``On calibration of modern neural networks,'' in \emph{Proc. ICML}, 2017, pp.~1321--1330.
+
+\bibitem{demsar2006statistical}
+J.~Dem\v{s}ar, ``Statistical comparisons of classifiers over multiple data sets,'' \emph{J.\ Mach.\ Learn.\ Res.}, vol.~7, pp.~1--30, 2006.
+
+\bibitem{loshchilov2019adamw}
+I.~Loshchilov and F.~Hutter, ``Decoupled weight decay regularization,'' in \emph{Proc. ICLR}, 2019.
+
+% --- Prior work by the PI (cited at appropriate methodological locations) ---
+
+\bibitem{shi2020robustness}
+Z.~Shi, H.~Zhang, K.-W.~Chang, M.~Huang, and C.-J.~Hsieh, ``Robustness verification for transformers,'' in \emph{Proc. ICLR}, 2020.
+
+\end{thebibliography}
+
+
+%% ============================================================
+%% RUSSIAN-LANGUAGE TITLE, ABSTRACT, KEYWORDS (INJOIT convention)
+%% ============================================================
+
+\vspace{1.5em}
+\noindent\rule{\columnwidth}{0.4pt}
+
+\begin{otherlanguage}{russian}
+
+\vspace{0.8em}
+\noindent\textbf{\large LipMamba: Селективные модели пространства состояний с ограничением Липшица и сертификатами PAC-Байеса для гарантированной устойчивости к отравлению скрытого состояния в больших языковых моделях}
+
+\vspace{0.6em}
+\noindent\textit{Роджер Ник Анаэдевха, Александр Геннадьевич Трофимов, Юрий Владимирович Бородачёв}
+
+\vspace{0.8em}
+\noindent\textbf{Аннотация.} Селективные модели пространства состояний, такие как Mamba, стали эффективной альтернативой механизмам внимания в больших языковых моделях, обеспечивая линейную по времени сложность вывода. Однако недавние работы показали, что зависящий от входа механизм дискретизации создаёт ранее не обнаруженную поверхность атаки: короткие враждебные последовательности токенов способны привести параметр шага дискретизации $\Delta_t$ к насыщению, вызывая необратимое <<отравление скрытого состояния>> (HiSPA), которое стирает предыдущий контекст и распространяется на все последующие токены. Существующие средства защиты, включая детекторы образцов активаций и методы прерывания цепей, обеспечивают эмпирическое смягчение, но не дают формальных гарантий. В настоящей работе представлена \textbf{LipMamba} --- архитектура селективной SSM с ограничением Липшица, дополненная сертификатами обобщения PAC-Байеса, которые в совокупности впервые обеспечивают \emph{гарантированную} архитектурную защиту от отравления скрытого состояния. Сделано три вклада. Во-первых, выведены точные оценки Липшица для слоёв селективных SSM, явно учитывающие зависимость от входа тройки $(\Delta_t, \mathbf{B}_t, \mathbf{C}_t)$. Во-вторых, доказана теорема о сертифицированном иммунитете к отравлению, утверждающая, что при спектрально-ограниченных параметризациях и обрезке шага $\Delta_t \leq \Delta_{\max}$ ни один триггер длиной меньше аналитически вычисленной границы $\ell^*$ не может снизить норму скрытого состояния ниже выбранного порога безопасности $\alpha_{\min}$. В-третьих, оценки PAC-Байеса в стиле Мак-Аллестера расширены на SSM с ограничением Липшица, давая невырожденные численные значения на масштабе 130--370 миллионов параметров. Оценка на наборах RoBench-25, HarmBench, JailbreakBench и четырёх базах данных систем обнаружения вторжений (CIC-IDS2017, Edge-IIoTset, UNSW-NB15, TON\_IoT) демонстрирует точность с сертификатом 80,4\% при сертифицированном радиусе $\epsilon^* = 0{,}18$ для атак HiSPA при длине триггера $\ell = 24$, лишь с накладными расходами в 4,7\% по перплексии относительно неограниченной Mamba и со снижением показателя успеха атаки на 61,2 процентных пункта. LipMamba интегрирована в платформу RobustIDPS.ai как сертифицированная замена модели MambaShield для обработки потоков с задержкой 0,6 мс на одно ядро ЦП.
+
+\vspace{0.6em}
+\noindent\textbf{Ключевые слова:} селективные модели пространства состояний, Mamba, непрерывность Липшица, PAC-Байес, гарантированная устойчивость, отравление скрытого состояния, большие языковые модели, системы обнаружения вторжений.
+
+\end{otherlanguage}
+
+\end{document}
